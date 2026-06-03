@@ -1,0 +1,9 @@
+.inputRow { display: flex; gap: 8px; align-items: center; }
+.eyeBtn { background: var(--bg3); border: 1px solid var(--border); border-radius: 8px; padding: 0.75rem; color: var(--muted); transition: all 0.15s; flex-shrink: 0; }
+.eyeBtn:hover { color: var(--text); border-color: var(--border2); }
+.required { color: var(--red); }
+.optional { color: var(--muted); font-size: 10px; text-transform: none; letter-spacing: 0; }
+.preview { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 0.75rem 1rem; }
+.previewLabel { display: block; font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); margin-bottom: 6px; }
+.previewCode { font-size: 11px; color: var(--accent2); word-break: break-all; }
+.hint { font-size: 12px; color: var(--red); text-align: center; margin-top: -0.5rem; }
