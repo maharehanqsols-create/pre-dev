@@ -1,6 +1,6 @@
 import requests
 
-API_KEY = "cb4ea6ed-4ecf-485c-9666-2726365da1e7"
+API_KEY = "your_ollama_api_key_here"
 BASE_URL = "https://ollama-api.q-solutions.pk/v1/chat/completions"
 
 headers = {
