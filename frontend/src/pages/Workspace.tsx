@@ -1,8 +1,12 @@
 import { useState, useRef, useEffect } from 'react'
 import { Plus, Settings, Trash2, Send, Loader, FileText, TestTube, Menu, X, Zap } from 'lucide-react'
-import { useNavigate } from 'react-router-dom'
 import { useStore, type Session, type TCRecord } from '../store/session'
-import { generatePRD, regeneratePRD, approvePRD, generateTests, approveTest, rejectTest, regenerateTest } from '../api/client'
+import {
+  streamGeneratePRD, streamGenerateTests,
+  regeneratePRD, approvePRD,
+  approveTest, rejectTest, regenerateTest,
+  type ProgressEvent,
+} from '../api/client'
 import ChatPanel from '../components/chat/ChatPanel'
 import PRDPanel from '../components/prd/PRDPanel'
 import TestCasePanel from '../components/testcases/TestCasePanel'
@@ -12,10 +16,11 @@ import s from './Workspace.module.css'
 type RightTab = 'prd' | 'testcases'
 
 export default function Workspace() {
-  const nav = useNavigate()
-  const { sessions, activeSessionId, config, configOpen, setConfigOpen,
+  const {
+    sessions, activeSessionId, config, configOpen, setConfigOpen,
     createSession, setActiveSession, deleteSession,
-    addMessage, updateSession, addPRDVersion, updateTC, getActiveSession } = useStore()
+    addMessage, updateLastMessage, updateSession, addPRDVersion, updateTC, getActiveSession,
+  } = useStore()
 
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
@@ -26,32 +31,25 @@ export default function Workspace() {
   const session = getActiveSession()
 
   useEffect(() => {
-    if (chatEndRef.current) {
-      chatEndRef.current.scrollIntoView({ behavior: 'smooth' })
-    }
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [session?.messages.length, loading])
 
   const currentPRD = session?.prdVersions.at(-1)
 
-  // Example user stories
   const exampleStories = [
-    { icon: '🔐', title: 'Password Reset', story: 'As a user, I want to reset my password so I can regain access to my account' },
-    { icon: '👥', title: 'User Registration', story: 'As a new user, I want to create an account so I can access the platform' },
-    { icon: '💳', title: 'Checkout Flow', story: 'As a buyer, I want to checkout with my saved payment method to complete purchase faster' },
+    { icon: '🔐', title: 'Password Reset', story: 'As a registered user, I want to reset my password via email OTP so that I can regain access to my account when I forget my password. The system should send a 6-digit OTP, expire it in 10 minutes, and lock the account after 3 failed attempts.' },
+    { icon: '👥', title: 'User Registration', story: 'As a new visitor, I want to create an account with email verification so that I can access the platform. Include email uniqueness check, password strength validation, and a welcome email after successful registration.' },
+    { icon: '💳', title: 'Checkout Flow', story: 'As a logged-in buyer, I want to checkout with my saved payment method and address so that I can complete my purchase faster. Support coupon codes, show order summary, handle payment failures, and send order confirmation email.' },
+    { icon: '🔔', title: 'Notifications', story: 'As a user, I want to manage my notification preferences for email, SMS, and push notifications so that I only receive alerts I care about. Include per-channel toggles, frequency settings, and quiet hours.' },
   ]
-
-  const handleExampleClick = (story: string) => {
-    setInput(story)
-  }
 
   const handleSend = async () => {
     if (!input.trim() || loading) return
     const text = input.trim()
     setInput('')
 
-    let sess: Session
     if (!session) {
-      sess = createSession(text)
+      const sess = createSession(text)
       await doGeneratePRD(sess, text)
     } else if (session.stage === 'idle') {
       addMessage(session.id, { role: 'user', content: text, type: 'text' })
@@ -64,29 +62,58 @@ export default function Workspace() {
     }
   }
 
+  // ── Streaming PRD generation ──────────────────────────────────
+
   const doGeneratePRD = async (sess: Session, story: string) => {
     setLoading(true)
-    setLoadingMsg('✨ Generating PRD…')
-    addMessage(sess.id, { role: 'user', content: story, type: 'text' })
+    updateSession(sess.id, { stage: 'prd_generating' })
+
+    // Add progress placeholder message
+    addMessage(sess.id, {
+      role: 'assistant',
+      content: '⏳ Analyzing your user story…',
+      type: 'progress',
+    })
+
     try {
-      const prd = await generatePRD(story, config)
-      addPRDVersion(sess.id, {
-        prdId: prd.id,
-        content: prd.content,
-        label: 'PRD v1',
-        createdAt: prd.created_at,
-      })
-      updateSession(sess.id, { stage: 'prd_generated', currentPrdId: prd.id })
+      const result = await streamGeneratePRD(
+        story,
+        config,
+        (evt: ProgressEvent) => {
+          setLoadingMsg(evt.message)
+          updateLastMessage(sess.id, `⏳ ${evt.message}`)
+        },
+      )
+
+      // Remove progress message, add real PRD message
       addMessage(sess.id, {
         role: 'assistant',
-        content: 'PRD has been generated. Review it, give feedback, or approve to proceed.',
+        content: result.is_complex
+          ? `PRD generated across ${result.modules.length} modules: ${result.modules.join(', ')}. Review and approve to generate test cases.`
+          : 'PRD generated. Review it on the right panel, give feedback here, or approve to generate test cases.',
         type: 'prd_ready',
-        prdId: prd.id,
+        prdId: result.id,
         prdVersion: 1,
       })
+
+      addPRDVersion(sess.id, {
+        prdId: result.id,
+        content: result.content,
+        label: 'PRD v1',
+        modules: result.modules,
+        isComplex: result.is_complex,
+        createdAt: result.created_at,
+      })
+
+      updateSession(sess.id, {
+        stage: 'prd_generated',
+        currentPrdId: result.id,
+      })
+
       setRightTab('prd')
     } catch (e: any) {
       addMessage(sess.id, { role: 'assistant', content: `❌ Error: ${e.message}`, type: 'text' })
+      updateSession(sess.id, { stage: 'idle' })
     } finally {
       setLoading(false)
       setLoadingMsg('')
@@ -95,19 +122,24 @@ export default function Workspace() {
 
   const doRegenPRD = async (sess: Session, feedback: string, prdId: number) => {
     setLoading(true)
-    setLoadingMsg('🔄 Regenerating PRD with your feedback…')
+    addMessage(sess.id, { role: 'assistant', content: '⏳ Regenerating PRD with your feedback…', type: 'progress' })
+
     try {
       const story = sess.userStory || sess.messages.find(m => m.role === 'user')?.content || ''
-      const promptWithFeedback = `${story}\n\nUser feedback: ${feedback}`
-      const prd = await regeneratePRD(prdId, promptWithFeedback, config)
+      const prd = await regeneratePRD(prdId, `${story}\n\nFeedback: ${feedback}`, config)
       const version = sess.prdVersions.length + 1
+
       addPRDVersion(sess.id, {
         prdId: prd.id,
         content: prd.content,
         label: `PRD v${version}`,
+        modules: prd.modules,
+        isComplex: prd.is_complex,
         createdAt: prd.created_at,
       })
-      updateSession(sess.id, { currentPrdId: prd.id })
+
+      updateSession(sess.id, { currentPrdId: prd.id, stage: 'prd_generated' })
+
       addMessage(sess.id, {
         role: 'assistant',
         content: `PRD updated to v${version} based on your feedback.`,
@@ -115,46 +147,65 @@ export default function Workspace() {
         prdId: prd.id,
         prdVersion: version,
       })
+
       setRightTab('prd')
     } catch (e: any) {
       addMessage(sess.id, { role: 'assistant', content: `❌ Error: ${e.message}`, type: 'text' })
     } finally {
       setLoading(false)
-      setLoadingMsg('')
     }
   }
+
+  // ── PRD Approve ───────────────────────────────────────────────
 
   const handleApprovePRD = async () => {
     if (!session?.currentPrdId) return
     setLoading(true)
-    setLoadingMsg('✓ Approving PRD…')
     try {
       await approvePRD(session.currentPrdId)
       updateSession(session.id, { stage: 'prd_approved' })
       addMessage(session.id, {
         role: 'assistant',
-        content: '✓ PRD approved! Ready to generate test cases.',
+        content: '✓ PRD approved! Click "Generate Tests" or type feedback to improve it further.',
         type: 'status',
       })
     } catch (e: any) {
       addMessage(session.id, { role: 'assistant', content: `❌ Error: ${e.message}`, type: 'text' })
     } finally {
       setLoading(false)
-      setLoadingMsg('')
     }
   }
+
+  // ── Streaming test generation ─────────────────────────────────
 
   const handleGenerateTests = async () => {
     if (!session?.currentPrdId) return
     setLoading(true)
-    setLoadingMsg('🧪 Generating scenarios → risks → test cases…')
+    updateSession(session.id, { stage: 'tests_generating' })
+
+    addMessage(session.id, {
+      role: 'assistant',
+      content: '⏳ Starting test generation pipeline…',
+      type: 'progress',
+    })
+
     try {
-      if (session.stage !== 'prd_approved') {
+      // Auto-approve PRD if not already approved
+      if (session.stage !== 'prd_approved' && session.stage !== 'tests_generated') {
         await approvePRD(session.currentPrdId)
         updateSession(session.id, { stage: 'prd_approved' })
       }
-      const tcs = await generateTests(session.currentPrdId, config)
-      const mapped: TCRecord[] = tcs.map((t: any) => ({
+
+      const result = await streamGenerateTests(
+        session.currentPrdId,
+        config,
+        (evt: ProgressEvent) => {
+          setLoadingMsg(evt.message)
+          updateLastMessage(session.id, `⏳ ${evt.message}`)
+        },
+      )
+
+      const mapped: TCRecord[] = result.test_cases.map((t: any) => ({
         id: t.id,
         title: t.title,
         priority: t.priority,
@@ -164,26 +215,34 @@ export default function Workspace() {
         preconditions: t.preconditions,
         gherkin_steps: t.gherkin_steps,
         risks: t.risks,
+        edge_notes: t.edge_notes || [],
         limitations: t.limitations,
         scenario_id: t.scenario_id,
         scenario_title: t.scenario_title,
         scenario_category: t.scenario_category,
+        reject_reason: t.reject_reason,
       }))
+
       updateSession(session.id, { stage: 'tests_generated', testCases: mapped })
+
       addMessage(session.id, {
         role: 'assistant',
-        content: `✓ ${mapped.length} test cases generated. Review below.`,
+        content: `✓ ${mapped.length} test cases generated — review them in the panel on the right.`,
         type: 'tests_ready',
         tcIds: mapped.map(t => t.id),
       })
+
       setRightTab('testcases')
     } catch (e: any) {
       addMessage(session.id, { role: 'assistant', content: `❌ Error: ${e.message}`, type: 'text' })
+      updateSession(session.id, { stage: 'prd_approved' })
     } finally {
       setLoading(false)
       setLoadingMsg('')
     }
   }
+
+  // ── TC actions ────────────────────────────────────────────────
 
   const handleApproveTC = async (id: number) => {
     if (!session) return
@@ -196,12 +255,12 @@ export default function Workspace() {
     if (!session) return
     await rejectTest(id, reason)
     const tc = session.testCases.find(t => t.id === id)
-    if (tc) updateTC(session.id, { ...tc, status: 'rejected' })
+    if (tc) updateTC(session.id, { ...tc, status: 'rejected', reject_reason: reason })
   }
 
   const handleRegenTC = async (tc: TCRecord) => {
     if (!session || !currentPRD) return
-    const updated = await regenerateTest(tc.id, config, tc, currentPRD.content)
+    const updated = await regenerateTest(id, config, tc, currentPRD.content)
     updateTC(session.id, {
       ...tc,
       title: updated.title,
@@ -209,54 +268,42 @@ export default function Workspace() {
       tags: updated.tags,
       preconditions: updated.preconditions,
       gherkin_steps: updated.gherkin_steps,
+      risks: updated.risks,
+      edge_notes: updated.edge_notes || [],
       status: 'pending',
+      reject_reason: undefined,
     })
   }
 
   return (
     <div className={s.workspaceContainer}>
-      {/* Left Sidebar */}
+
+      {/* ── Left Sidebar ── */}
       <aside className={`${s.sidebar} ${sidebarOpen ? s.open : s.closed}`}>
         <div className={s.sidebarHeader}>
           <div className={s.logo}>
-            <Zap size={24} className={s.logoIcon} />
+            <Zap size={20} className={s.logoIcon} />
             <span className={s.logoText}>QA Pipeline</span>
           </div>
-          <button
-            className={s.toggleBtn}
-            onClick={() => setSidebarOpen(!sidebarOpen)}
-            title="Toggle sidebar"
-          >
-            {sidebarOpen ? <X size={18} /> : <Menu size={18} />}
+          <button className={s.toggleBtn} onClick={() => setSidebarOpen(!sidebarOpen)}>
+            {sidebarOpen ? <X size={16} /> : <Menu size={16} />}
           </button>
         </div>
 
         <div className={s.sessionControls}>
-          <button
-            className={s.newSessionBtn}
-            onClick={() => {
-              createSession('New Session')
-              setInput('')
-            }}
-          >
-            <Plus size={18} />
-            <span>New Session</span>
+          <button className={s.newSessionBtn} onClick={() => { createSession('New Session'); setInput('') }}>
+            <Plus size={16} /><span>New Session</span>
           </button>
-          <button
-            className={s.settingsBtn}
-            onClick={() => setConfigOpen(!configOpen)}
-          >
-            <Settings size={18} />
-            <span>Settings</span>
+          <button className={s.settingsBtn} onClick={() => setConfigOpen(!configOpen)}>
+            <Settings size={16} /><span>Settings</span>
           </button>
         </div>
 
         <div className={s.sessionList}>
           <p className={s.sessionListLabel}>Sessions</p>
-          {sessions.length === 0 ? (
-            <div className={s.emptyState}>No sessions yet</div>
-          ) : (
-            sessions.map(sess => (
+          {sessions.length === 0
+            ? <div className={s.emptyState}>No sessions yet</div>
+            : sessions.map(sess => (
               <div
                 key={sess.id}
                 className={`${s.sessionCard} ${sess.id === activeSessionId ? s.active : ''}`}
@@ -264,56 +311,44 @@ export default function Workspace() {
               >
                 <div className={s.sessionInfo}>
                   <p className={s.sessionName}>{sess.userStory || 'Untitled'}</p>
-                  <span className={`${s.stageBadge} ${s[`stage${sess.stage}`]}`}>
+                  <span className={`${s.stageBadge} ${s[`stage_${sess.stage}`]}`}>
                     {sess.stage.replace(/_/g, ' ')}
                   </span>
                 </div>
                 <button
                   className={s.deleteBtn}
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    deleteSession(sess.id)
-                  }}
-                  title="Delete session"
+                  onClick={e => { e.stopPropagation(); deleteSession(sess.id) }}
                 >
-                  <Trash2 size={14} />
+                  <Trash2 size={13} />
                 </button>
               </div>
             ))
-          )}
+          }
         </div>
 
         <div className={s.sidebarFooter}>
-          <button
-            className={s.logoutBtn}
-            onClick={() => nav('/config')}
-          >
-            <Settings size={16} />
-            <span>LLM Config</span>
+          <button className={s.configFooterBtn} onClick={() => setConfigOpen(true)}>
+            <Settings size={14} />
+            <span>{config.provider} / {config.model?.split('/').pop()}</span>
           </button>
         </div>
       </aside>
 
-      {/* Center Chat Panel */}
+      {/* ── Center Chat ── */}
       <main className={s.mainPanel}>
         {!session ? (
-          <div className={s.emptyState}>
+          <div className={s.emptyMain}>
             <div className={s.emptyHeader}>
               <div className={s.emptyIcon}>⚡</div>
               <h2 className={s.emptyTitle}>QA Intelligence Pipeline</h2>
-              <p className={s.emptySubtitle}>Transform user stories into production-ready test assets</p>
+              <p className={s.emptySubtitle}>Transform user stories into production-ready test assets with streaming AI</p>
             </div>
-
             <div className={s.examplesGrid}>
               {exampleStories.map((ex, i) => (
-                <button
-                  key={i}
-                  className={s.exampleCard}
-                  onClick={() => handleExampleClick(ex.story)}
-                >
+                <button key={i} className={s.exampleCard} onClick={() => setInput(ex.story)}>
                   <span className={s.exampleIcon}>{ex.icon}</span>
                   <p className={s.exampleTitle}>{ex.title}</p>
-                  <p className={s.exampleText}>{ex.story}</p>
+                  <p className={s.exampleText}>{ex.story.slice(0, 80)}…</p>
                 </button>
               ))}
             </div>
@@ -332,81 +367,67 @@ export default function Workspace() {
           />
         )}
 
-        {/* Input Area */}
         <div className={s.inputArea}>
           <div className={s.inputWrapper}>
-            <input
-              type="text"
+            <textarea
               value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyPress={(e) => e.key === 'Enter' && !e.shiftKey && handleSend()}
-              placeholder={session ? 'Add feedback or request changes…' : 'Describe a user story…'}
+              onChange={e => setInput(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend() } }}
+              placeholder={session ? 'Add feedback or request changes… (Enter to send, Shift+Enter for newline)' : 'Describe a user story in detail…'}
               className={s.input}
               disabled={loading}
+              rows={2}
             />
             <button
               className={`${s.sendBtn} ${loading ? s.loading : ''}`}
               onClick={handleSend}
               disabled={!input.trim() || loading}
             >
-              {loading ? (
-                <Loader size={18} className={s.spinning} />
-              ) : (
-                <Send size={18} />
-              )}
+              {loading ? <Loader size={16} className={s.spinning} /> : <Send size={16} />}
             </button>
           </div>
-          {loadingMsg && <p className={s.loadingMsg}>{loadingMsg}</p>}
+          {loadingMsg && (
+            <div className={s.progressBar}>
+              <div className={s.progressDot} />
+              <p className={s.loadingMsg}>{loadingMsg}</p>
+            </div>
+          )}
         </div>
       </main>
 
-      {/* Right Artifact Panel */}
+      {/* ── Right Panel ── */}
       <aside className={s.artifactPanel}>
         <div className={s.panelTabs}>
           <button
             className={`${s.tab} ${rightTab === 'prd' ? s.active : ''}`}
             onClick={() => setRightTab('prd')}
           >
-            <FileText size={16} />
-            <span>PRD</span>
+            <FileText size={14} /><span>PRD</span>
+            {session?.prdVersions.length ? (
+              <span className={s.tabBadge}>{session.prdVersions.length}</span>
+            ) : null}
           </button>
           <button
             className={`${s.tab} ${rightTab === 'testcases' ? s.active : ''}`}
             onClick={() => setRightTab('testcases')}
           >
-            <TestTube size={16} />
-            <span>Test Cases</span>
+            <TestTube size={14} /><span>Test Cases</span>
+            {session?.testCases.length ? (
+              <span className={s.tabBadge}>{session.testCases.length}</span>
+            ) : null}
           </button>
         </div>
 
         <div className={s.panelContent}>
-          {rightTab === 'prd' && session && (
-            <PRDPanel
-              session={session}
-              currentPRD={currentPRD}
-              onApprove={handleApprovePRD}
-              onRegenerate={() => {}}
-              loading={loading}
-            />
-          )}
-          {rightTab === 'testcases' && session && (
-            <TestCasePanel
-              testCases={session.testCases}
-              onApprove={handleApproveTC}
-              onReject={handleRejectTC}
-              onRegenerate={handleRegenTC}
-              loading={loading}
-            />
-          )}
-          {!session && (
-            <div className={s.panelEmpty}>
-              <p>Start a session to see artifacts</p>
-            </div>
-          )}
+          {rightTab === 'prd' && session
+            ? <PRDPanel session={session} currentPRD={currentPRD} onApprove={handleApprovePRD} onGenerateTests={handleGenerateTests} loading={loading} />
+            : rightTab === 'testcases' && session
+            ? <TestCasePanel testCases={session.testCases} onApprove={handleApproveTC} onReject={handleRejectTC} onRegenerate={handleRegenTC} loading={loading} />
+            : <div className={s.panelEmpty}><p>Start a session to see artifacts</p></div>
+          }
         </div>
       </aside>
 
-      {/* Config Modal */}
       {configOpen && <ConfigModal />}
     </div>
   )

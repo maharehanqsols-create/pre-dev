@@ -1,15 +1,21 @@
-from typing import Type, TypeVar
+# backend/utils/llm_client.py
+"""
+LLM Client - Unified interface for all LLM operations
+"""
+from typing import Type, TypeVar, Optional, List, Dict, Any
 import json
 import re
 import litellm
 from pydantic import BaseModel
 from backend.models.schema import LLMConfig, LLMProvider
 
+T = TypeVar("T", bound=BaseModel)
+
+# Configure litellm
 litellm.suppress_debug_info = True
 litellm.drop_params = True
 
-T = TypeVar("T", bound=BaseModel)
-
+# Default models for each provider
 DEFAULT_MODELS = {
     LLMProvider.openai:      "gpt-4o",
     LLMProvider.gemini:      "gemini/gemini-2.0-flash",
@@ -18,6 +24,7 @@ DEFAULT_MODELS = {
     LLMProvider.custom:      "Qwen3-VL:latest",
 }
 
+# Max tokens per provider
 MAX_TOKENS = {
     LLMProvider.openai:      4096,
     LLMProvider.gemini:      4096,
@@ -26,35 +33,64 @@ MAX_TOKENS = {
     LLMProvider.custom:      4096,
 }
 
+# Providers that use official APIs (no custom base_url)
+CLOUD_PROVIDERS = {LLMProvider.openai, LLMProvider.gemini, LLMProvider.openrouter}
 
-def _resolve_model(config: LLMConfig) -> str:
+
+def resolve_model(config: LLMConfig) -> str:
+    """Resolve the full model name with provider prefix"""
     raw = config.model or DEFAULT_MODELS[config.provider]
+    
+    # For custom OpenAI-compatible endpoints, prefix with openai/
     if config.provider == LLMProvider.custom:
-        return raw if raw.startswith("openai/") else f"openai/{raw}"
+        if raw.startswith("openai/"):
+            return raw
+        return f"openai/{raw}"
+    
     if config.provider == LLMProvider.ollama:
         return raw if raw.startswith("ollama/") else f"ollama/{raw}"
+    
     if config.provider == LLMProvider.openrouter:
         return raw if raw.startswith("openrouter/") else f"openrouter/{raw}"
+    
     if config.provider == LLMProvider.gemini:
         return raw if raw.startswith("gemini/") else f"gemini/{raw}"
+    
+    # OpenAI and others
     return raw
 
 
-def _build_kwargs(config: LLMConfig) -> dict:
+def build_kwargs(config: LLMConfig) -> dict:
+    """Build litellm kwargs from config"""
     kwargs = {}
+    
+    # Add API key if provided
     if config.api_key and config.api_key.strip():
         kwargs["api_key"] = config.api_key.strip()
-    else:
-        kwargs["api_key"] = "none"
-    if config.base_url and config.base_url.strip():
-        kwargs["base_url"] = config.base_url.strip()
-    elif config.provider == LLMProvider.ollama:
-        kwargs["base_url"] = "http://localhost:11434"
+    elif config.provider in CLOUD_PROVIDERS:
+        # Cloud providers require API keys
+        print(f"⚠️ Warning: No API key provided for {config.provider}")
+    
+    # Only add base_url for providers that support custom endpoints
+    if config.provider not in CLOUD_PROVIDERS:
+        if config.base_url and config.base_url.strip():
+            kwargs["base_url"] = config.base_url.strip()
+            print(f"📍 Using custom base_url for {config.provider}: {config.base_url}")
+        elif config.provider == LLMProvider.ollama:
+            kwargs["base_url"] = "http://localhost:11434"
+            print(f"📍 Using default Ollama base_url: http://localhost:11434")
+    
+    # Debug logging
+    print(f"🤖 Provider: {config.provider}")
+    print(f"📝 Model: {resolve_model(config)}")
+    print(f"🔑 Has API Key: {bool(config.api_key)}")
+    print(f"🌐 Base URL: {kwargs.get('base_url', 'Not set (using default)')}")
+    
     return kwargs
 
 
-def _clean_json(raw: str) -> str:
-    """Extract pure JSON from model output."""
+def clean_json(raw: str) -> str:
+    """Extract pure JSON from model output"""
     if not raw or not raw.strip():
         return ""
 
@@ -79,25 +115,32 @@ def _clean_json(raw: str) -> str:
     return text.strip()
 
 
-async def _call_model(
+async def call_model(
     config: LLMConfig,
-    messages: list,
+    messages: List[Dict[str, str]],
     temperature: float,
 ) -> str:
-    model  = _resolve_model(config)
-    kwargs = _build_kwargs(config)
+    """Make the actual LLM call"""
+    model = resolve_model(config)
+    kwargs = build_kwargs(config)
     max_tokens = MAX_TOKENS.get(config.provider, 2048)
 
-    print(f"MODEL={model} | TEMP={temperature}")
+    print(f"🚀 Calling LLM: {model} | Temperature: {temperature} | Max tokens: {max_tokens}")
 
-    response = await litellm.acompletion(
-        model=model,
-        messages=messages,
-        temperature=temperature,
-        max_tokens=max_tokens,
-        **kwargs,
-    )
-    return (response.choices[0].message.content or "").strip()
+    try:
+        response = await litellm.acompletion(
+            model=model,
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            **kwargs,
+        )
+        content = (response.choices[0].message.content or "").strip()
+        print(f"✅ LLM response received ({len(content)} chars)")
+        return content
+    except Exception as e:
+        print(f"❌ LLM call failed: {e}")
+        raise
 
 
 async def llm_complete(
@@ -106,11 +149,12 @@ async def llm_complete(
     user: str,
     temperature: float = 0.2,
 ) -> str:
-    return await _call_model(
+    """Simple LLM completion without structured output"""
+    return await call_model(
         config=config,
         messages=[
             {"role": "system", "content": system},
-            {"role": "user",   "content": user},
+            {"role": "user", "content": user},
         ],
         temperature=temperature,
     )
@@ -124,63 +168,72 @@ async def llm_structured(
     temperature: float = 0.1,
     max_retries: int = 3,
 ) -> T:
+    """Get structured JSON output from LLM"""
     schema_json = json.dumps(schema.model_json_schema(), indent=2)
 
-    # Attempt 1 & 2: ask for JSON directly
     for attempt in range(max_retries):
-        if attempt == 0:
-            # First try: clear JSON instruction
-            sys_msg = (
-                system + "\n\n"
-                "OUTPUT FORMAT: Respond with ONLY a raw JSON object. "
-                "No thinking, no explanation, no markdown. "
-                "Start immediately with { and end with }.\n"
-                f"Schema:\n{schema_json}"
-            )
-            user_msg = user
-        elif attempt == 1:
-            # Second try: show example structure
-            sys_msg = (
-                "You must output ONLY valid JSON. Nothing else.\n"
-                f"Schema:\n{schema_json}"
-            )
-            user_msg = user
-        else:
-            # Third try: ask model to fix its own bad output
-            sys_msg = (
-                "Convert the following content into valid JSON matching this schema.\n"
-                "Output ONLY the JSON object, nothing else.\n"
-                f"Schema:\n{schema_json}"
-            )
-            user_msg = user
-
         try:
-            raw = await _call_model(
+            # Adjust prompt based on attempt
+            if attempt == 0:
+                # First try: clear JSON instruction
+                sys_msg = (
+                    system + "\n\n"
+                    "OUTPUT FORMAT: Respond with ONLY a raw JSON object. "
+                    "No thinking, no explanation, no markdown. "
+                    "Start immediately with { and end with }.\n"
+                    f"Schema:\n{schema_json}"
+                )
+                user_msg = user
+            elif attempt == 1:
+                # Second try: even stricter
+                sys_msg = (
+                    "You must output ONLY valid JSON. Nothing else.\n"
+                    f"Schema:\n{schema_json}\n\n"
+                    "Do not include any text before or after the JSON."
+                )
+                user_msg = user
+            else:
+                # Third try: ask model to fix its own bad output
+                sys_msg = (
+                    "The previous response was not valid JSON. "
+                    "Convert the following content into valid JSON matching this schema.\n"
+                    "Output ONLY the JSON object, nothing else.\n"
+                    f"Schema:\n{schema_json}"
+                )
+                user_msg = user
+
+            # Adjust temperature slightly on retries
+            current_temp = min(temperature + (attempt * 0.05), 0.5)
+            
+            raw = await call_model(
                 config=config,
                 messages=[
                     {"role": "system", "content": sys_msg},
-                    {"role": "user",   "content": user_msg},
+                    {"role": "user", "content": user_msg},
                 ],
-                temperature=temperature + (attempt * 0.05),
+                temperature=current_temp,
             )
 
-            print(f"Attempt {attempt+1} raw ({len(raw)} chars): {raw[:150]}")
+            print(f"📝 Attempt {attempt+1} raw response ({len(raw)} chars): {raw[:150]}...")
 
             if not raw.strip():
-                print(f"Attempt {attempt+1}: empty response, retrying...")
+                print(f"⚠️ Attempt {attempt+1}: empty response, retrying...")
                 continue
 
-            clean = _clean_json(raw)
-            print(f"Attempt {attempt+1} clean: {clean[:150]}")
+            clean = clean_json(raw)
+            print(f"🧹 Attempt {attempt+1} cleaned: {clean[:150]}...")
 
             if not clean:
-                print(f"Attempt {attempt+1}: no JSON found after cleaning, retrying...")
+                print(f"⚠️ Attempt {attempt+1}: no JSON found after cleaning, retrying...")
                 continue
 
-            return schema.model_validate_json(clean)
+            # Validate and parse JSON
+            result = schema.model_validate_json(clean)
+            print(f"✅ Successfully parsed JSON on attempt {attempt+1}")
+            return result
 
         except Exception as e:
-            print(f"Attempt {attempt+1} failed: {e}")
+            print(f"❌ Attempt {attempt+1} failed: {e}")
             if attempt == max_retries - 1:
                 raise ValueError(
                     f"Model returned invalid JSON after {max_retries} attempts. "
@@ -190,3 +243,19 @@ async def llm_structured(
             continue
 
     raise ValueError("All retry attempts exhausted")
+
+
+# Convenience function to test the connection
+async def test_connection(config: LLMConfig) -> bool:
+    """Test if the LLM connection works"""
+    try:
+        response = await llm_complete(
+            config=config,
+            system="You are a helpful assistant.",
+            user="Say 'OK' in one word.",
+            temperature=0.1,
+        )
+        return response.strip().upper() == "OK"
+    except Exception as e:
+        print(f"Connection test failed: {e}")
+        return False
