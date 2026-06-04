@@ -1,10 +1,10 @@
 /* Three-Panel Layout */
 .workspaceContainer {
   display: grid;
-  grid-template-columns: 280px 1fr 360px;
-  height: 100%;
+  grid-template-columns: 280px minmax(0, 1fr) 360px;
+  height: 100vh;
+  overflow: hidden;
   background: var(--bg-primary);
-  gap: 0;
 }
 
 /* Left Sidebar */
@@ -260,6 +260,9 @@
   flex-direction: column;
   background: var(--bg-primary);
   border-right: 1px solid var(--border);
+
+  min-width: 0;
+  overflow: hidden;
 }
 
 .emptyHeader {
@@ -413,6 +416,8 @@
   border-left: 1px solid var(--border);
   display: flex;
   flex-direction: column;
+
+  min-width: 0;
   overflow: hidden;
 }
 

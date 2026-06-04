@@ -1,13 +1,13 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 
-export type Stage = 'idle' | 'prd_generated' | 'prd_approved' | 'tests_generated'
+export type Stage = 'idle' | 'prd_generating' | 'prd_generated' | 'prd_approved' | 'tests_generating' | 'tests_generated'
 
 export interface Message {
   id: string
   role: 'user' | 'assistant'
   content: string
-  type: 'text' | 'prd_ready' | 'prd_updated' | 'tests_ready' | 'status'
+  type: 'text' | 'prd_ready' | 'prd_updated' | 'tests_ready' | 'status' | 'progress'
   timestamp: string
   prdId?: number
   prdVersion?: number
@@ -19,7 +19,20 @@ export interface PRDVersion {
   prdId: number
   content: string
   label: string
+  modules: string[]
+  isComplex: boolean
   createdAt: string
+}
+
+export interface RiskDetail {
+  severity: 'HIGH' | 'MEDIUM' | 'LOW'
+  description: string
+  mitigation: string
+}
+
+export interface GherkinStep {
+  keyword: string
+  text: string
 }
 
 export interface TCRecord {
@@ -30,12 +43,14 @@ export interface TCRecord {
   status: 'pending' | 'approved' | 'rejected'
   tags: string[]
   preconditions: string[]
-  gherkin_steps: { keyword: string; text: string }[]
-  risks: string[]
+  gherkin_steps: GherkinStep[]
+  risks: RiskDetail[]       // now structured
+  edge_notes: string[]      // new
   limitations: string[]
   scenario_id: string
   scenario_title: string
   scenario_category: string
+  reject_reason?: string
 }
 
 export interface Session {
@@ -69,6 +84,7 @@ interface Store {
   setActiveSession: (id: string) => void
   deleteSession: (id: string) => void
   addMessage: (sessionId: string, msg: Omit<Message, 'id' | 'timestamp'>) => void
+  updateLastMessage: (sessionId: string, content: string) => void
   updateSession: (sessionId: string, updates: Partial<Session>) => void
   addPRDVersion: (sessionId: string, v: Omit<PRDVersion, 'version'>) => void
   updateTC: (sessionId: string, tc: TCRecord) => void
@@ -132,6 +148,17 @@ export const useStore = create<Store>()(
         }))
       },
 
+      updateLastMessage: (sessionId, content) => {
+        set(s => ({
+          sessions: s.sessions.map(sess => {
+            if (sess.id !== sessionId) return sess
+            const msgs = [...sess.messages]
+            if (msgs.length > 0) msgs[msgs.length - 1] = { ...msgs[msgs.length - 1], content }
+            return { ...sess, messages: msgs }
+          }),
+        }))
+      },
+
       updateSession: (sessionId, updates) =>
         set(s => ({
           sessions: s.sessions.map(sess =>
@@ -172,6 +199,6 @@ export const useStore = create<Store>()(
         return sessions.find(s => s.id === activeSessionId) ?? null
       },
     }),
-    { name: 'qa-pipeline-v2' }
+    { name: 'qa-pipeline-v3' }
   )
 )

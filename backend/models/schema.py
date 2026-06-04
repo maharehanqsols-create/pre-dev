@@ -1,3 +1,4 @@
+# backend/models/schema.py
 from typing import Optional, List
 from datetime import datetime
 from enum import Enum
@@ -11,35 +12,38 @@ import json
 # ─────────────────────────────────────────
 
 class PRDStatus(str, Enum):
-    draft = "draft"
+    draft    = "draft"
     approved = "approved"
-    dropped = "dropped"
+    dropped  = "dropped"
 
 
 class TestCaseStatus(str, Enum):
-    pending = "pending"
+    pending  = "pending"
     approved = "approved"
     rejected = "rejected"
 
 
 class Priority(str, Enum):
-    high = "HIGH"
+    high   = "HIGH"
     medium = "MEDIUM"
-    low = "LOW"
+    low    = "LOW"
 
 
 class ScenarioCategory(str, Enum):
-    functional = "functional"
-    negative = "negative"
-    boundary = "boundary"
+    functional  = "functional"
+    negative    = "negative"
+    boundary    = "boundary"
+    edge_case   = "edge_case"
+    security    = "security"
+    performance = "performance"
 
 
 class LLMProvider(str, Enum):
-    openai = "openai"
-    ollama = "ollama"
-    openrouter = "openrouter"
-    gemini = "gemini"
-    custom = "custom"
+    openai      = "openai"
+    ollama      = "ollama"
+    openrouter  = "openrouter"
+    gemini      = "gemini"
+    custom      = "custom"
 
 
 # ─────────────────────────────────────────
@@ -49,49 +53,47 @@ class LLMProvider(str, Enum):
 class PRDRecord(SQLModel, table=True):
     __tablename__ = "prds"
 
-    id: Optional[int] = Field(default=None, primary_key=True)
-    user_story: str
-    content: str                          # full PRD markdown/json string
-    status: PRDStatus = PRDStatus.draft
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    id:           Optional[int] = Field(default=None, primary_key=True)
+    user_story:   str
+    content:      str
+    modules:      str = "[]"
+    is_complex:   bool = False
+    status:       PRDStatus = PRDStatus.draft
+    created_at:   datetime = Field(default_factory=datetime.utcnow)
+    updated_at:   datetime = Field(default_factory=datetime.utcnow)
+
+    def modules_list(self) -> List[str]:
+        return json.loads(self.modules)
 
 
 class TestCaseRecord(SQLModel, table=True):
     __tablename__ = "test_cases"
 
-    id: Optional[int] = Field(default=None, primary_key=True)
-    prd_id: int = Field(foreign_key="prds.id")
-    scenario_id: str
-    scenario_title: str
+    id:                Optional[int] = Field(default=None, primary_key=True)
+    prd_id:            int = Field(foreign_key="prds.id")
+    scenario_id:       str
+    scenario_title:    str
     scenario_category: str
-    title: str
-    priority: Priority
-    tags: str = "[]"                      # JSON list stored as string
-    preconditions: str = "[]"             # JSON list
-    gherkin_steps: str = "[]"            # JSON list of {keyword, text}
-    risks: str = "[]"                    # JSON list
-    limitations: str = "[]"             # JSON list
-    status: TestCaseStatus = TestCaseStatus.pending
-    reject_reason: Optional[str] = None
-    hash_key: str = ""
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    title:             str
+    priority:          Priority
+    tags:              str = "[]"
+    preconditions:     str = "[]"
+    gherkin_steps:     str = "[]"
+    risks:             str = "[]"
+    edge_notes:        str = "[]"
+    limitations:       str = "[]"
+    status:            TestCaseStatus = TestCaseStatus.pending
+    reject_reason:     Optional[str] = None
+    hash_key:          str = ""
+    created_at:        datetime = Field(default_factory=datetime.utcnow)
+    updated_at:        datetime = Field(default_factory=datetime.utcnow)
 
-    def tags_list(self) -> List[str]:
-        return json.loads(self.tags)
-
-    def preconditions_list(self) -> List[str]:
-        return json.loads(self.preconditions)
-
-    def steps_list(self) -> List[dict]:
-        return json.loads(self.gherkin_steps)
-
-    def risks_list(self) -> List[str]:
-        return json.loads(self.risks)
-
-    def limitations_list(self) -> List[str]:
-        return json.loads(self.limitations)
+    def tags_list(self)         -> List[str]:  return json.loads(self.tags)
+    def preconditions_list(self)-> List[str]:  return json.loads(self.preconditions)
+    def steps_list(self)        -> List[dict]: return json.loads(self.gherkin_steps)
+    def risks_list(self)        -> List[dict]: return json.loads(self.risks)
+    def edge_notes_list(self)   -> List[str]:  return json.loads(self.edge_notes)
+    def limitations_list(self)  -> List[str]:  return json.loads(self.limitations)
 
 
 # ─────────────────────────────────────────
@@ -99,15 +101,15 @@ class TestCaseRecord(SQLModel, table=True):
 # ─────────────────────────────────────────
 
 class LLMConfig(BaseModel):
-    provider: LLMProvider
-    api_key: Optional[str] = None         # None for ollama (local)
-    model: Optional[str] = None           # override default model
-    base_url: Optional[str] = None        # for ollama or openrouter
+    provider:  LLMProvider
+    api_key:   Optional[str] = None
+    model:     Optional[str] = None
+    base_url:  Optional[str] = None
 
 
 class GeneratePRDRequest(BaseModel):
     user_story: str
-    config: LLMConfig
+    config:     LLMConfig
 
 
 class UpdatePRDRequest(BaseModel):
@@ -115,36 +117,45 @@ class UpdatePRDRequest(BaseModel):
 
 
 class PRDResponse(BaseModel):
-    id: int
+    id:         int
     user_story: str
-    content: str
-    status: PRDStatus
+    content:    str
+    modules:    List[str]
+    is_complex: bool
+    status:     PRDStatus
     created_at: datetime
     updated_at: datetime
 
 
 class GherkinStep(BaseModel):
-    keyword: str                          # Given | When | Then | And
-    text: str
+    keyword: str
+    text:    str
+
+
+class RiskDetail(BaseModel):
+    severity:    str
+    description: str
+    mitigation:  str
 
 
 class TestCaseResponse(BaseModel):
-    id: int
-    prd_id: int
-    scenario_id: str
-    scenario_title: str
+    id:                int
+    prd_id:            int
+    scenario_id:       str
+    scenario_title:    str
     scenario_category: str
-    title: str
-    priority: Priority
-    tags: List[str]
-    preconditions: List[str]
-    gherkin_steps: List[GherkinStep]
-    risks: List[str]
-    limitations: List[str]
-    status: TestCaseStatus
-    reject_reason: Optional[str]
-    created_at: datetime
-    updated_at: datetime
+    title:             str
+    priority:          Priority
+    tags:              List[str]
+    preconditions:     List[str]
+    gherkin_steps:     List[GherkinStep]
+    risks:             List[RiskDetail]
+    edge_notes:        List[str]
+    limitations:       List[str]
+    status:            TestCaseStatus
+    reject_reason:     Optional[str]
+    created_at:        datetime
+    updated_at:        datetime
 
 
 class GenerateTestsRequest(BaseModel):
@@ -153,11 +164,11 @@ class GenerateTestsRequest(BaseModel):
 
 
 class UpdateTestCaseRequest(BaseModel):
-    title: Optional[str] = None
-    priority: Optional[Priority] = None
-    tags: Optional[List[str]] = None
-    preconditions: Optional[List[str]] = None
-    gherkin_steps: Optional[List[GherkinStep]] = None
+    title:          Optional[str]             = None
+    priority:       Optional[Priority]        = None
+    tags:           Optional[List[str]]       = None
+    preconditions:  Optional[List[str]]       = None
+    gherkin_steps:  Optional[List[GherkinStep]] = None
 
 
 class RejectTestCaseRequest(BaseModel):
@@ -165,8 +176,8 @@ class RejectTestCaseRequest(BaseModel):
 
 
 class RegenerateTestCaseRequest(BaseModel):
-    config: LLMConfig
-    scenario_id: str
-    scenario_title: str
+    config:            LLMConfig
+    scenario_id:       str
+    scenario_title:    str
     scenario_category: str
-    prd_content: str
+    prd_content:       str

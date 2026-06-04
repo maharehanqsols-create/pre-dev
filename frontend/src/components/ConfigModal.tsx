@@ -1,10 +1,10 @@
 import { useState, useEffect } from 'react'
 import { X, Eye, EyeOff } from 'lucide-react'
 import { useStore } from '../store/session'
-import { getProviders } from '../api/client'
+import { getProviders, type Provider } from '../api'
 import s from './ConfigModal.module.css'
 
-const FALLBACK = [
+const FALLBACK: Provider[] = [
   { id: 'custom', name: 'Custom (Q-Solutions)', requires_key: true, default_model: 'Qwen3-VL:latest', models: ['Qwen3-VL:latest','gemma4:e4b'], default_base_url: 'https://ollama-api.q-solutions.pk/v1', requires_base_url: true },
   { id: 'openai', name: 'OpenAI', requires_key: true, default_model: 'gpt-4o', models: ['gpt-4o','gpt-4o-mini'], requires_base_url: false },
   { id: 'gemini', name: 'Google Gemini', requires_key: true, default_model: 'gemini-2.0-flash', models: ['gemini-2.0-flash','gemini-1.5-pro'], requires_base_url: false },
@@ -14,7 +14,7 @@ const FALLBACK = [
 
 export default function ConfigModal() {
   const { config, setConfig, setConfigOpen } = useStore()
-  const [providers, setProviders] = useState(FALLBACK)
+  const [providers, setProviders] = useState<Provider[]>(FALLBACK)
   const [provider, setProvider] = useState(config.provider || 'custom')
   const [apiKey, setApiKey] = useState(config.api_key || '')
   const [baseUrl, setBaseUrl] = useState(config.base_url || 'https://ollama-api.q-solutions.pk/v1')
