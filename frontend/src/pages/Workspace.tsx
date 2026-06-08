@@ -260,7 +260,7 @@ export default function Workspace() {
 
   const handleRegenTC = async (tc: TCRecord) => {
     if (!session || !currentPRD) return
-    const updated = await regenerateTest(id, config, tc, currentPRD.content)
+    const updated = await regenerateTest(tc.id, config, tc, currentPRD.content)
     updateTC(session.id, {
       ...tc,
       title: updated.title,

@@ -1,266 +1,160 @@
 import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { ChevronRight, Zap, Eye, EyeOff, Check, Sparkles, Server, Key, Globe, Cpu } from 'lucide-react'
-import { useConfig } from '../ConfigContext'
-import { getProviders } from '../api'
-import type { Provider } from '../api'
-import s from './Config.module.css'
+import { X, Eye, EyeOff, Check } from 'lucide-react'
+import { useStore } from '../store/session'
+import s from './ConfigModal.module.css'
 
-export default function ConfigPage() {
-  const { config, setConfig } = useConfig()
-  const [providers, setProviders] = useState<Provider[]>([])
-  const [selectedProvider, setSelectedProvider] = useState(config.provider)
-  const [apiKey, setApiKey] = useState(config.api_key || '')
-  const [baseUrl, setBaseUrl] = useState(config.base_url || '')
-  const [selectedModel, setSelectedModel] = useState(config.model || '')
-  const [customModel, setCustomModel] = useState('')
-  const [showKey, setShowKey] = useState(false)
-  const [isSaving, setIsSaving] = useState(false)
-  const nav = useNavigate()
+const PROVIDERS = [
+  { id: 'custom',     name: 'Q-Solutions',   requiresKey: true,  requiresUrl: true,  defaultModel: 'Qwen3-VL:latest', defaultUrl: 'https://ollama-api.q-solutions.pk/v1', models: ['Qwen3-VL:latest', 'gemma4:e4b'] },
+  { id: 'openai',     name: 'OpenAI',        requiresKey: true,  requiresUrl: false, defaultModel: 'gpt-4o',          defaultUrl: '', models: ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo'] },
+  { id: 'gemini',     name: 'Gemini',        requiresKey: true,  requiresUrl: false, defaultModel: 'gemini-2.0-flash', defaultUrl: '', models: ['gemini-2.0-flash', 'gemini-1.5-pro', 'gemini-1.5-flash'] },
+  { id: 'openrouter', name: 'OpenRouter',    requiresKey: true,  requiresUrl: false, defaultModel: 'meta-llama/llama-3.1-70b-instruct', defaultUrl: '', models: ['meta-llama/llama-3.1-70b-instruct', 'anthropic/claude-sonnet-4-5', 'mistralai/mistral-large'] },
+  { id: 'ollama',     name: 'Ollama (local)',requiresKey: false, requiresUrl: false, defaultModel: 'llama3.1',        defaultUrl: '', models: ['llama3.1', 'mistral', 'codellama', 'gemma2'] },
+]
 
-  useEffect(() => {
-    getProviders().then(p => {
-      setProviders(p)
-      const cur = p.find(x => x.id === selectedProvider)
-      if (cur) {
-        if (!selectedModel) setSelectedModel(cur.default_model)
-        if (!baseUrl && (cur as any).default_base_url) setBaseUrl((cur as any).default_base_url)
-      }
-    })
-  }, [])
+export default function ConfigModal() {
+  const { config, setConfig, setConfigOpen } = useStore()
 
-  const current = providers.find(p => p.id === selectedProvider)
+  const [provider,     setProvider]     = useState(config.provider || 'custom')
+  const [apiKey,       setApiKey]       = useState(config.api_key || '')
+  const [baseUrl,      setBaseUrl]      = useState(config.base_url || '')
+  const [model,        setModel]        = useState(config.model || '')
+  const [customModel,  setCustomModel]  = useState('')
+  const [showKey,      setShowKey]      = useState(false)
+  const [saved,        setSaved]        = useState(false)
 
+  const cur = PROVIDERS.find(p => p.id === provider)!
+
+  // When provider changes, reset model/url to defaults
   const handleProviderChange = (id: string) => {
-    setSelectedProvider(id as any)
-    const p = providers.find(x => x.id === id)
-    if (p) {
-      setSelectedModel(p.default_model)
-      setBaseUrl((p as any).default_base_url || '')
-      setCustomModel('')
-    }
+    const p = PROVIDERS.find(x => x.id === id)!
+    setProvider(id)
+    setModel(p.defaultModel)
+    setBaseUrl(p.defaultUrl)
+    setCustomModel('')
+    setApiKey('')
   }
 
-  const effectiveModel = customModel.trim() || selectedModel
+  const effectiveModel = customModel.trim() || model
 
-  const canContinue = () => {
-    if (!current) return false
-    if (current.requires_key && !apiKey.trim()) return false
-    if ((current as any).requires_base_url && !baseUrl.trim()) return false
+  const canSave = () => {
+    if (cur.requiresKey && !apiKey.trim()) return false
+    if (cur.requiresUrl && !baseUrl.trim()) return false
     if (!effectiveModel) return false
     return true
   }
 
-  const save = async () => {
-    setIsSaving(true)
-    // Simulate save delay for better UX
-    await new Promise(resolve => setTimeout(resolve, 500))
+  const save = () => {
     setConfig({
-      provider: selectedProvider as any,
-      api_key: apiKey.trim() || undefined,
-      model: effectiveModel,
+      provider,
+      api_key:  cur.requiresKey ? (apiKey.trim() || undefined) : undefined,
+      model:    effectiveModel,
       base_url: baseUrl.trim() || undefined,
     })
-    nav('/pipeline')
-  }
-
-  const getProviderIcon = (providerId: string) => {
-    switch(providerId) {
-      case 'openai': return '🤖'
-      case 'anthropic': return '🧠'
-      case 'google': return '🔬'
-      case 'ollama': return '🦙'
-      case 'custom': return '⚙️'
-      default: return '💡'
-    }
+    setSaved(true)
+    setTimeout(() => { setSaved(false); setConfigOpen(false) }, 900)
   }
 
   return (
-    <div className={s.page}>
-      <div className={s.gradientBg} />
-      
-      <div className={s.header}>
-        <div className={s.logo}>
-          <div className={s.logoIcon}>
-            <Zap size={20} />
-          </div>
-          <span>QA Pipeline</span>
+    <div className={s.overlay} onClick={() => setConfigOpen(false)}>
+      <div className={s.modal} onClick={e => e.stopPropagation()}>
+        <div className={s.header}>
+          <span className={s.title}>LLM Configuration</span>
+          <button className={s.closeBtn} onClick={() => setConfigOpen(false)}><X size={15} /></button>
         </div>
-        <div className={s.headerContent}>
-          <div className={s.badge}>
-            <Sparkles size={12} />
-            <span>AI-Powered Testing</span>
-          </div>
-          <h1 className={s.title}>Configure your LLM</h1>
-          <p className={s.sub}>Choose a provider and customize your AI testing experience</p>
-        </div>
-      </div>
 
-      <div className={s.container}>
-        <div className={s.card}>
-          {/* Provider Selection */}
-          <div className={s.section}>
-            <div className={s.sectionHeader}>
-              <Server size={16} />
-              <label className={s.label}>AI Provider</label>
-            </div>
+        <div className={s.body}>
+          {/* Provider grid */}
+          <div className={s.field}>
+            <label className={s.label}>Provider</label>
             <div className={s.providerGrid}>
-              {providers.map(p => (
+              {PROVIDERS.map(p => (
                 <button
                   key={p.id}
-                  className={`${s.providerBtn} ${selectedProvider === p.id ? s.active : ''}`}
+                  className={`${s.provBtn} ${provider === p.id ? s.active : ''}`}
                   onClick={() => handleProviderChange(p.id)}
                 >
-                  <div className={s.providerIcon}>
-                    {getProviderIcon(p.id)}
-                  </div>
-                  <div className={s.providerInfo}>
-                    <span className={s.providerName}>{p.name}</span>
-                    {!p.requires_key && (
-                      <span className={s.badge}>
-                        <Cpu size={10} />
-                        local
-                      </span>
-                    )}
-                  </div>
-                  {selectedProvider === p.id && (
-                    <div className={s.checkmark}>
-                      <Check size={14} />
-                    </div>
-                  )}
+                  {p.name}
+                  {!p.requiresKey && <span className={s.localTag}>local</span>}
                 </button>
               ))}
             </div>
           </div>
 
-          {/* API Key Field */}
-          {current?.requires_key && (
-            <div className={`${s.section} ${s.fadeIn}`}>
-              <div className={s.sectionHeader}>
-                <Key size={16} />
-                <label className={s.label}>API Key</label>
-              </div>
-              <div className={s.inputWrapper}>
+          {/* API Key */}
+          {cur.requiresKey && (
+            <div className={s.field}>
+              <label className={s.label}>
+                API Key <span className={s.required}>*</span>
+              </label>
+              <div className={s.inputRow}>
                 <input
                   className={s.input}
                   type={showKey ? 'text' : 'password'}
-                  placeholder={`Enter your ${current.name} API key`}
                   value={apiKey}
                   onChange={e => setApiKey(e.target.value)}
+                  placeholder={`Enter ${cur.name} API key`}
                 />
                 <button className={s.eyeBtn} onClick={() => setShowKey(!showKey)}>
-                  {showKey ? <EyeOff size={16} /> : <Eye size={16} />}
+                  {showKey ? <EyeOff size={13} /> : <Eye size={13} />}
                 </button>
               </div>
-              <p className={s.inputHint}>
-                Your API key is stored locally and never shared
-              </p>
             </div>
           )}
 
-          {/* Base URL Fields */}
-          {(selectedProvider === 'custom' || selectedProvider === 'ollama') && (
-            <div className={`${s.section} ${s.fadeIn}`}>
-              <div className={s.sectionHeader}>
-                <Globe size={16} />
-                <label className={s.label}>
-                  Base URL
-                  {selectedProvider === 'custom' && <span className={s.required}>*</span>}
-                </label>
-              </div>
+          {/* Base URL */}
+          {(provider === 'custom' || provider === 'ollama') && (
+            <div className={s.field}>
+              <label className={s.label}>
+                Base URL {cur.requiresUrl && <span className={s.required}>*</span>}
+              </label>
               <input
                 className={s.input}
-                type="text"
-                placeholder={selectedProvider === 'custom'
-                  ? 'https://your-api-endpoint.com/v1'
-                  : 'http://localhost:11434'}
                 value={baseUrl}
                 onChange={e => setBaseUrl(e.target.value)}
+                placeholder={cur.defaultUrl || 'http://localhost:11434'}
               />
-              {selectedProvider === 'ollama' && (
-                <p className={s.inputHint}>
-                  Default: http://localhost:11434
-                </p>
-              )}
             </div>
           )}
 
-          {/* Model Selection */}
-          <div className={s.section}>
-            <div className={s.sectionHeader}>
-              <Cpu size={16} />
-              <label className={s.label}>Model</label>
-            </div>
+          {/* Model select */}
+          <div className={s.field}>
+            <label className={s.label}>Model</label>
             <select
-              className={s.select}
-              value={selectedModel}
-              onChange={e => { setSelectedModel(e.target.value); setCustomModel('') }}
+              className={s.input}
+              value={model}
+              onChange={e => { setModel(e.target.value); setCustomModel('') }}
             >
-              {current?.models.map(m => (
-                <option key={m} value={m}>{m}</option>
-              ))}
+              {cur.models.map(m => <option key={m} value={m}>{m}</option>)}
             </select>
           </div>
 
-          {/* Custom Model */}
-          <div className={s.section}>
-            <div className={s.sectionHeader}>
-              <Sparkles size={16} />
-              <label className={s.label}>
-                Custom Model
-                <span className={s.optional}>Optional</span>
-              </label>
-            </div>
+          {/* Custom model override */}
+          <div className={s.field}>
+            <label className={s.label}>
+              Custom model <span className={s.opt}>(overrides above)</span>
+            </label>
             <input
               className={s.input}
-              type="text"
-              placeholder="Enter custom model name (overrides selection)"
               value={customModel}
               onChange={e => setCustomModel(e.target.value)}
+              placeholder="e.g. gemma4:e4b or gpt-4o-2024-11-20"
             />
           </div>
 
-          {/* Config Preview */}
+          {/* Preview */}
           <div className={s.preview}>
-            <div className={s.previewHeader}>
-              <span className={s.previewLabel}>Active Configuration</span>
-              <div className={s.previewStatus}>
-                <div className={s.statusDot} />
-                <span>Ready</span>
-              </div>
-            </div>
-            <div className={s.previewContent}>
-              <code className={s.previewCode}>
-                {selectedProvider} / {effectiveModel || '—'}
-                {baseUrl && ` @ ${baseUrl}`}
-              </code>
-            </div>
+            <span className={s.previewLabel}>Active config:</span>
+            <code className={s.previewCode}>
+              {provider} / {effectiveModel || '—'}{baseUrl ? ` → ${baseUrl}` : ''}
+            </code>
           </div>
+        </div>
 
-          {/* Continue Button */}
-          <button 
-            className={`${s.saveBtn} ${isSaving ? s.loading : ''}`} 
-            onClick={save} 
-            disabled={!canContinue() || isSaving}
-          >
-            {isSaving ? (
-              <>
-                <div className={s.spinner} />
-                <span>Saving...</span>
-              </>
-            ) : (
-              <>
-                <span>Continue to Pipeline</span>
-                <ChevronRight size={18} />
-              </>
-            )}
+        <div className={s.footer}>
+          <button className={s.cancelBtn} onClick={() => setConfigOpen(false)}>Cancel</button>
+          <button className={s.saveBtn} onClick={save} disabled={!canSave()}>
+            {saved ? <><Check size={13} /> Saved!</> : 'Save configuration'}
           </button>
-          
-          {!canContinue() && current?.requires_key && !apiKey && (
-            <div className={s.errorMessage}>
-              <span>⚠️ API key is required to continue</span>
-            </div>
-          )}
         </div>
       </div>
     </div>

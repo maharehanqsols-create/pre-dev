@@ -1,180 +1,204 @@
-.chatPanel {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
+.panel { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 
 .messages {
-  flex: 1;
-  overflow-y: auto;
-  padding: 24px;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
+  flex: 1; overflow-y: auto; padding: 20px 24px;
+  display: flex; flex-direction: column; gap: 18px;
 }
 
-.message {
-  display: flex;
-  gap: 12px;
-  animation: slideIn 0.3s ease;
+/* User */
+.userRow { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+.userMeta { font-size: 10px; color: var(--muted); }
+.userBubble {
+  background: var(--accent); color: white;
+  padding: 10px 14px; border-radius: 14px 3px 14px 14px;
+  font-size: 13px; line-height: 1.6; max-width: 72%;
 }
 
-@keyframes slideIn {
-  from {
-    opacity: 0;
-    transform: translateY(10px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+/* AI */
+.aiRow { display: flex; gap: 10px; align-items: flex-start; }
+.aiAvatar {
+  width: 28px; height: 28px; border-radius: 50%;
+  background: var(--accent-bg); color: var(--accent2);
+  font-size: 13px; display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0; margin-top: 2px;
 }
+.aiBody { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.aiMeta { font-size: 10px; color: var(--muted); }
+.aiText { font-size: 13px; line-height: 1.65; color: var(--text); }
+.statusText { color: var(--green); }
 
-.message.user {
-  justify-content: flex-end;
+/* Progress */
+.progressMsg {
+  display: flex; align-items: center; gap: 10px;
+  font-size: 12px; color: var(--muted);
 }
-
-.message.assistant {
-  justify-content: flex-start;
+.progressSpinner {
+  width: 14px; height: 14px; border-radius: 50%;
+  border: 2px solid var(--border2); border-top-color: var(--accent);
+  animation: spin 0.7s linear infinite; flex-shrink: 0;
 }
+@keyframes spin { to { transform: rotate(360deg); } }
 
-.avatar {
-  width: 32px;
-  height: 32px;
-  min-width: 32px;
-  border-radius: 50%;
-  background: var(--accent-bg);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 16px;
+/* Artifact card */
+.artifact {
+  background: var(--bg2); border: 1px solid var(--border);
+  border-radius: 10px; overflow: hidden;
+}
+.artifactHeader {
+  display: flex; align-items: center; gap: 8px;
+  padding: 9px 14px; border-bottom: 1px solid var(--border);
+  background: var(--bg3); font-size: 12px; font-weight: 500; color: var(--text);
+}
+.artifactIcon { font-size: 14px; }
+.vBadge {
+  font-size: 10px; background: var(--accent-bg); color: var(--accent2);
+  padding: 1px 7px; border-radius: 10px;
+}
+.tcStats { font-size: 11px; color: var(--muted); margin-left: auto; }
+.artifactDesc { font-size: 12px; color: var(--muted); padding: 10px 14px; }
+
+/* HITL buttons */
+.hitlRow {
+  display: flex; gap: 6px; padding: 9px 14px;
+  border-top: 1px solid var(--border); flex-wrap: wrap;
+}
+.hitlBtn {
+  display: flex; align-items: center; gap: 5px;
+  padding: 5px 11px; border-radius: 20px; font-size: 11px;
+  border: 1px solid var(--border2); background: none;
+  color: var(--muted); transition: all 0.15s;
+}
+.hitlBtn:hover:not(:disabled) { color: var(--text); }
+.hitlBtn:disabled { opacity: 0.4; cursor: not-allowed; }
+.approveBtn { border-color: rgba(34,197,94,0.3); color: var(--green); }
+.approveBtn:hover:not(:disabled) { background: rgba(34,197,94,0.08); }
+.regenBtn { border-color: rgba(124,106,255,0.3); color: var(--accent2); }
+.regenBtn:hover:not(:disabled) { background: rgba(124,106,255,0.08); }
+.testBtn:hover:not(:disabled) { background: var(--bg3); }
+
+/* Feedback */
+.feedbackBox {
+  padding: 10px 14px; border-top: 1px solid var(--border);
+  display: flex; flex-direction: column; gap: 8px;
+}
+.feedbackInput {
+  width: 100%; background: var(--bg); border: 1px solid var(--border2);
+  border-radius: 7px; padding: 8px 10px; color: var(--text);
+  font-size: 12px; resize: none; outline: none;
+}
+.feedbackInput:focus { border-color: var(--accent); }
+.feedbackActions { display: flex; gap: 6px; justify-content: flex-end; }
+.cancelFb {
+  background: none; border: 1px solid var(--border2); border-radius: 6px;
+  padding: 5px 10px; font-size: 11px; color: var(--muted);
+}
+.sendFb {
+  background: var(--accent); border: none; border-radius: 6px;
+  padding: 5px 12px; font-size: 11px; color: white;
+}
+.sendFb:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* TC list */
+.tcList { display: flex; flex-direction: column; max-height: 480px; overflow-y: auto; }
+.tcCard { border-top: 1px solid var(--border); }
+.tcCard.approved { opacity: 0.75; }
+.tcHeader {
+  display: flex; align-items: center; gap: 6px;
+  padding: 8px 14px; cursor: pointer;
+}
+.tcHeader:hover { background: var(--bg3); }
+
+.tcPri {
+  font-size: 9px; font-weight: 700; padding: 2px 6px;
+  border-radius: 3px; flex-shrink: 0;
+}
+.tcPri[data-p="HIGH"] { background: rgba(239,68,68,0.12); color: var(--red); }
+.tcPri[data-p="MEDIUM"] { background: rgba(245,158,11,0.12); color: var(--amber); }
+.tcPri[data-p="LOW"] { background: rgba(107,107,128,0.15); color: var(--muted); }
+
+.tcCat {
+  font-size: 9px; color: var(--cyan); background: rgba(6,182,212,0.08);
+  padding: 2px 6px; border-radius: 3px; flex-shrink: 0;
+}
+.tcTitle {
+  font-size: 12px; color: var(--text); flex: 1;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.tcDot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+.tcDot.pending { background: var(--amber); }
+.tcDot.approved { background: var(--green); }
+.tcDot.rejected { background: var(--red); }
+
+.tcBody {
+  padding: 10px 14px; border-top: 1px solid var(--border);
+  background: var(--bg); display: flex; flex-direction: column; gap: 10px;
+}
+.tcSec { display: flex; flex-direction: column; gap: 3px; }
+.tcSecLabel {
+  font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--muted);
+}
+.tcPrecond { font-size: 12px; color: var(--muted); }
+.edgeNote { font-size: 12px; color: var(--amber); }
+
+.gherkin {
+  background: var(--bg2); border-radius: 7px;
+  padding: 10px 12px; display: flex; flex-direction: column; gap: 4px;
+}
+.step { display: flex; gap: 10px; align-items: baseline; }
+.kw { font-size: 11px; font-weight: 700; width: 46px; flex-shrink: 0; }
+.kw[data-kw="Given"] { color: var(--cyan); }
+.kw[data-kw="When"]  { color: var(--accent2); }
+.kw[data-kw="Then"]  { color: var(--green); }
+.kw[data-kw="And"], .kw[data-kw="But"] { color: var(--muted); }
+.stepText { font-size: 12px; color: var(--text); line-height: 1.5; }
+
+.risksBox {
+  background: rgba(245,158,11,0.05); border: 1px solid rgba(245,158,11,0.15);
+  border-radius: 7px; padding: 8px 10px; display: flex; flex-direction: column; gap: 5px;
+}
+.riskRow { display: flex; gap: 8px; align-items: baseline; }
+.riskSev {
+  font-size: 9px; font-weight: 700; padding: 1px 5px; border-radius: 3px;
   flex-shrink: 0;
 }
+.riskSev[data-sev="HIGH"]   { background: rgba(239,68,68,0.15); color: var(--red); }
+.riskSev[data-sev="MEDIUM"] { background: rgba(245,158,11,0.15); color: var(--amber); }
+.riskSev[data-sev="LOW"]    { background: rgba(107,107,128,0.15); color: var(--muted); }
+.riskDesc { font-size: 12px; color: var(--muted); }
 
-.bubble {
-  max-width: 60%;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+.tags { display: flex; flex-wrap: wrap; gap: 5px; }
+.tag {
+  font-size: 10px; background: var(--accent-bg); color: var(--accent2);
+  border-radius: 4px; padding: 2px 7px;
 }
 
-.message.user .bubble {
-  align-items: flex-end;
-  max-width: 70%;
+.rejectForm { display: flex; gap: 6px; align-items: center; }
+.rejectInput {
+  flex: 1; background: var(--bg2); border: 1px solid rgba(239,68,68,0.3);
+  border-radius: 6px; padding: 5px 9px; color: var(--text); font-size: 12px; outline: none;
+}
+.rejectConfirm {
+  background: var(--red); border: none; border-radius: 6px;
+  padding: 5px 10px; color: white; font-size: 11px;
+}
+.rejectCancel {
+  background: none; border: 1px solid var(--border2); border-radius: 6px;
+  padding: 5px 8px; color: var(--muted); font-size: 11px;
 }
 
-.message.user .bubble {
-  background: var(--primary);
-  color: white;
+.tcActions { display: flex; gap: 5px; justify-content: flex-end; padding-top: 4px; }
+.tcBtn {
+  display: flex; align-items: center; gap: 4px;
+  padding: 4px 9px; border-radius: 5px; font-size: 11px;
+  border: 1px solid var(--border2); background: none; color: var(--muted);
+  transition: all 0.12s;
 }
-
-.message.assistant .bubble {
-  background: var(--bg-secondary);
-  border: 1px solid var(--border);
-  color: var(--text-primary);
-}
-
-.bubble {
-  border-radius: 12px;
-  padding: 12px 16px;
-}
-
-.content {
-  font-size: 14px;
-  line-height: 1.5;
-  margin: 0;
-}
-
-.time {
-  font-size: 11px;
-  color: var(--text-tertiary);
-  align-self: flex-end;
-  margin-top: 4px;
-}
-
-.actions {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  margin-top: 8px;
-}
-
-.btn {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 12px;
-  border-radius: 6px;
-  font-size: 12px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  border: none;
-}
-
-.btn.primary {
-  background: var(--success);
-  color: white;
-}
-
-.btn.primary:hover:not(:disabled) {
-  opacity: 0.9;
-}
-
-.btn.secondary {
-  background: var(--bg-tertiary);
-  color: var(--text-secondary);
-  border: 1px solid var(--border);
-}
-
-.btn.secondary:hover:not(:disabled) {
-  background: var(--bg-hover);
-  color: var(--text-primary);
-}
-
-.btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.loading {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.spinner {
-  width: 16px;
-  height: 16px;
-  border: 2px solid var(--border);
-  border-top-color: var(--primary);
-  border-radius: 50%;
-  animation: spin 1s linear infinite;
-}
-
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-.loading p {
-  margin: 0;
-  font-size: 14px;
-  color: var(--text-secondary);
-}
-
-@media (max-width: 768px) {
-  .bubble {
-    max-width: 85%;
-  }
-
-  .message.user .bubble {
-    max-width: 90%;
-  }
-
-  .messages {
-    padding: 16px;
-  }
+.tcBtn:hover:not(:disabled) { color: var(--text); }
+.tcBtn:disabled { opacity: 0.4; cursor: not-allowed; }
+.tcReject { border-color: rgba(239,68,68,0.2); color: var(--red); }
+.tcApprove { background: rgba(34,197,94,0.08); border-color: rgba(34,197,94,0.2); color: var(--green); }
+.approvedBadge {
+  display: flex; align-items: center; gap: 5px;
+  font-size: 11px; color: var(--green); justify-content: flex-end;
 }

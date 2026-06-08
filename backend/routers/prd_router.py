@@ -1,18 +1,17 @@
 """
 PRD Router — Handles PRD generation with:
-  1. Scope analysis (is it single or multi-module?)
-  2. Module splitting for complex stories → parallel generation → merge
-  3. Streaming endpoint so the frontend shows progress live (no 524 timeouts)
-  4. Standard CRUD endpoints (unchanged)
+  1. Scope analysis (single vs multi-module detection)
+  2. Single unified PRD generation (modules become sections, never separate docs)
+  3. Streaming endpoint for live frontend progress (no 524 timeouts)
+  4. Standard CRUD endpoints
 
 Streaming endpoint: POST /api/prd/generate/stream
   - Returns Server-Sent Events (SSE)
-  - Frontend receives progress updates + final PRD
-  - Solves 524 timeout for long user stories
+  - 3-step flow: scope → generate → save
+  - No merge step needed (single-document architecture)
 """
 
 import json
-import asyncio
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
@@ -27,13 +26,13 @@ from backend.models.schema import (
     PRDStatus,
 )
 from backend.agents.scope_agent import analyze_scope
-from backend.agents.prd_agent import generate_prd, generate_module_prd, merge_prds
-from backend.utils.llm_client import LLMConfig, test_connection
+from backend.agents.prd_agent import generate_prd
+
 router = APIRouter(prefix="/api/prd", tags=["PRD"])
 
 
 # ─────────────────────────────────────────
-# Helper
+# Helpers
 # ─────────────────────────────────────────
 
 def _to_response(prd: PRDRecord) -> PRDResponse:
@@ -50,12 +49,18 @@ def _to_response(prd: PRDRecord) -> PRDResponse:
 
 
 def _sse(event: str, data: dict) -> str:
-    """Format a Server-Sent Event message."""
     return f"event: {event}\ndata: {json.dumps(data)}\n\n"
 
 
+def _extract_modules(scope) -> list[dict]:
+    """Extract module list from scope analysis result."""
+    if not scope.is_complex or not scope.modules:
+        return []
+    return [{"name": m.name, "focus": m.focus} for m in scope.modules]
+
+
 # ─────────────────────────────────────────
-# STREAMING endpoint (main — solves timeout)
+# Streaming endpoint
 # ─────────────────────────────────────────
 
 @router.post("/generate/stream")
@@ -63,116 +68,77 @@ async def generate_stream(body: GeneratePRDRequest):
     """
     Streaming PRD generation via SSE.
 
-    Events emitted:
-      progress  — status updates shown to user
-      complete  — final PRD content + saved record ID
-      error     — error message
+    Flow (3 steps):
+      1. Scope analysis  — detects modules if story is complex
+      2. PRD generation  — one LLM call, modules become sections in a single doc
+      3. Save to DB      — persists and returns final record
 
-    Frontend usage:
-      const es = new EventSource(...)  ← or use fetch with ReadableStream
+    SSE events:
+      progress  { step, total, message, ?modules, ?is_complex }
+      complete  { id, content, modules, is_complex, status, created_at, updated_at }
+      error     { message }
     """
 
     async def event_stream():
         try:
-            # ── Step 1: Analyze scope ─────────────────
+            # ── Step 1: Scope analysis ────────────────
             yield _sse("progress", {
                 "step": 1,
-                "total": 4,
+                "total": 3,
                 "message": "Analyzing user story scope...",
             })
 
             scope = await analyze_scope(body.user_story, body.config)
+            module_list = _extract_modules(scope)
+            module_names = [m["name"] for m in module_list]
 
-            if scope.is_complex:
-                module_names = [m.name for m in scope.modules]
+            if module_list:
                 yield _sse("progress", {
                     "step": 1,
-                    "total": 4,
-                    "message": f"Detected {len(scope.modules)} modules: {', '.join(module_names)}",
+                    "total": 3,
+                    "message": (
+                        f"Detected {len(module_list)} modules: {', '.join(module_names)}"
+                        " — generating unified PRD..."
+                    ),
                     "modules": module_names,
                     "is_complex": True,
                 })
             else:
                 yield _sse("progress", {
                     "step": 1,
-                    "total": 4,
-                    "message": "Single module detected — generating PRD directly",
+                    "total": 3,
+                    "message": "Single module detected — generating PRD...",
                     "is_complex": False,
                 })
 
-            # ── Step 2: Generate PRD(s) ───────────────
-            final_content: str
-            module_names_saved: list[str] = []
-
-            if not scope.is_complex or not scope.modules:
-                # Single module path
-                yield _sse("progress", {
-                    "step": 2,
-                    "total": 4,
-                    "message": "Generating PRD...",
-                })
-
-                final_content = await generate_prd(body.user_story, body.config)
-                module_names_saved = []
-
-            else:
-                # Multi-module path: generate each module PRD
-                all_module_names = [m.name for m in scope.modules]
-                module_prds = []
-
-                for idx, module in enumerate(scope.modules):
-                    yield _sse("progress", {
-                        "step": 2,
-                        "total": 4,
-                        "message": f"Generating PRD for module: {module.name} ({idx+1}/{len(scope.modules)})",
-                        "current_module": module.name,
-                        "module_index": idx + 1,
-                        "module_total": len(scope.modules),
-                    })
-
-                    module_content = await generate_module_prd(
-                        user_story   = body.user_story,
-                        module_name  = module.name,
-                        module_focus = module.focus,
-                        all_modules  = all_module_names,
-                        config       = body.config,
-                    )
-
-                    module_prds.append({
-                        "name":    module.name,
-                        "content": module_content,
-                    })
-
-                # ── Step 3: Merge module PRDs ─────────
-                yield _sse("progress", {
-                    "step": 3,
-                    "total": 4,
-                    "message": f"Merging {len(module_prds)} module PRDs into unified PRD...",
-                })
-
-                final_content = await merge_prds(
-                    user_story  = body.user_story,
-                    module_prds = module_prds,
-                    config      = body.config,
-                )
-                module_names_saved = all_module_names
-
-            # ── Step 4: Save to DB ────────────────────
+            # ── Step 2: Generate unified PRD ─────────
             yield _sse("progress", {
-                "step": 4,
-                "total": 4,
+                "step": 2,
+                "total": 3,
+                "message": "Generating PRD...",
+            })
+
+            content = await generate_prd(
+                user_story = body.user_story,
+                config     = body.config,
+                modules    = module_list or None,
+            )
+
+            # ── Step 3: Save to DB ────────────────────
+            yield _sse("progress", {
+                "step": 3,
+                "total": 3,
                 "message": "Saving PRD...",
             })
 
-            # We need a DB session — use a context manager approach
             from backend.db.database import engine
             from sqlmodel import Session as SyncSession
 
             with SyncSession(engine) as session:
                 prd = PRDRecord(
                     user_story = body.user_story,
-                    content    = final_content,
-                    modules    = json.dumps(module_names_saved),
+                    content    = content,
+                    modules    = json.dumps(module_names),
                     is_complex = scope.is_complex,
                     status     = PRDStatus.draft,
                 )
@@ -182,8 +148,8 @@ async def generate_stream(body: GeneratePRDRequest):
 
                 yield _sse("complete", {
                     "id":         prd.id,
-                    "content":    final_content,
-                    "modules":    module_names_saved,
+                    "content":    content,
+                    "modules":    module_names,
                     "is_complex": scope.is_complex,
                     "status":     prd.status.value,
                     "created_at": prd.created_at.isoformat(),
@@ -198,15 +164,14 @@ async def generate_stream(body: GeneratePRDRequest):
         event_stream(),
         media_type="text/event-stream",
         headers={
-            "Cache-Control":   "no-cache",
-            "X-Accel-Buffering": "no",   # disable nginx buffering
+            "Cache-Control":     "no-cache",
+            "X-Accel-Buffering": "no",
         },
     )
 
 
 # ─────────────────────────────────────────
-# Standard (non-streaming) generate
-# Kept for backward compatibility
+# Non-streaming generate
 # ─────────────────────────────────────────
 
 @router.post("/generate", response_model=PRDResponse)
@@ -216,36 +181,22 @@ async def generate(
 ):
     """
     Non-streaming PRD generation.
-    WARNING: May timeout (524) for complex user stories.
-    Prefer /generate/stream for production use.
+    WARNING: May timeout (524) for complex stories. Prefer /generate/stream.
     """
     try:
-        # Quick scope check
         scope = await analyze_scope(body.user_story, body.config)
-
-        if scope.is_complex and scope.modules:
-            all_module_names = [m.name for m in scope.modules]
-            module_prds = []
-            for module in scope.modules:
-                mc = await generate_module_prd(
-                    user_story   = body.user_story,
-                    module_name  = module.name,
-                    module_focus = module.focus,
-                    all_modules  = all_module_names,
-                    config       = body.config,
-                )
-                module_prds.append({"name": module.name, "content": mc})
-            content = await merge_prds(body.user_story, module_prds, body.config)
-            module_names = all_module_names
-        else:
-            content = await generate_prd(body.user_story, body.config)
-            module_names = []
-
+        module_list = _extract_modules(scope)
+        content = await generate_prd(
+            user_story = body.user_story,
+            config     = body.config,
+            modules    = module_list or None,
+        )
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"LLM error: {str(e)}")
 
+    module_names = [m["name"] for m in module_list]
     prd = PRDRecord(
         user_story = body.user_story,
         content    = content,
@@ -260,7 +211,7 @@ async def generate(
 
 
 # ─────────────────────────────────────────
-# Standard CRUD (unchanged logic)
+# CRUD
 # ─────────────────────────────────────────
 
 @router.get("/", response_model=list[PRDResponse])

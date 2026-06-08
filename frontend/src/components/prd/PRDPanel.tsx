@@ -1,146 +1,134 @@
-import { CheckCircle, RefreshCw, Download, Copy } from 'lucide-react'
-import type { Session } from '../../store/session'
+import { CheckCircle, RefreshCw, Download, Copy, TestTube, Layers } from 'lucide-react'
+import { useState } from 'react'
+import type { Session, PRDVersion } from '../../store/session'
 import s from './PRDPanel.module.css'
 
 interface Props {
   session: Session
-  currentPRD: any
+  currentPRD?: PRDVersion
   onApprove: () => void
-  onRegenerate: () => void
+  onGenerateTests: () => void
   loading: boolean
 }
 
-export default function PRDPanel({
-  session,
-  currentPRD,
-  onApprove,
-  onRegenerate,
-  loading,
-}: Props) {
+export default function PRDPanel({ session, currentPRD, onApprove, onGenerateTests, loading }: Props) {
+  const [copied, setCopied] = useState(false)
+
   if (!currentPRD) {
     return (
       <div className={s.empty}>
+        <div className={s.emptyIcon}>📄</div>
         <p>Generate a PRD to see it here</p>
+        <span>Type a user story in the chat</span>
       </div>
     )
   }
 
-  const getStatus = () => {
-    if (session.stage === 'prd_approved') return 'approved'
-    return 'draft'
+  const isApproved = session.stage === 'prd_approved' || session.stage === 'tests_generating' || session.stage === 'tests_generated'
+
+  const copy = () => {
+    navigator.clipboard.writeText(currentPRD.content)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
   }
 
-  const status = getStatus()
+  const download = () => {
+    const a = document.createElement('a')
+    a.href = 'data:text/markdown;charset=utf-8,' + encodeURIComponent(currentPRD.content)
+    a.download = `${currentPRD.label}.md`
+    a.click()
+  }
 
   return (
-    <div className={s.prdPanel}>
+    <div className={s.panel}>
+      {/* Header */}
       <div className={s.header}>
-        <div className={s.info}>
-          <h3 className={s.title}>{currentPRD.label}</h3>
-          <span className={`${s.badge} ${s[status]}`}>
-            {status.charAt(0).toUpperCase() + status.slice(1)}
+        <div className={s.headerLeft}>
+          <span className={s.label}>{currentPRD.label}</span>
+          <span className={`${s.badge} ${isApproved ? s.approved : s.draft}`}>
+            {isApproved ? '✓ Approved' : 'Draft'}
           </span>
+          {currentPRD.isComplex && (
+            <span className={s.modulesBadge}>
+              <Layers size={10} /> {currentPRD.modules.length} modules
+            </span>
+          )}
         </div>
-        <div className={s.actions}>
-          <button
-            className={s.iconBtn}
-            title="Copy"
-            onClick={() => {
-              navigator.clipboard.writeText(currentPRD.content)
-            }}
-          >
-            <Copy size={16} />
+        <div className={s.headerActions}>
+          <button className={s.iconBtn} onClick={copy} title="Copy">
+            {copied ? '✓' : <Copy size={13} />}
           </button>
-          <button
-            className={s.iconBtn}
-            title="Download"
-            onClick={() => {
-              const element = document.createElement('a')
-              element.setAttribute(
-                'href',
-                'data:text/plain;charset=utf-8,' + encodeURIComponent(currentPRD.content)
-              )
-              element.setAttribute('download', `${currentPRD.label}.md`)
-              element.style.display = 'none'
-              document.body.appendChild(element)
-              element.click()
-              document.body.removeChild(element)
-            }}
-          >
-            <Download size={16} />
+          <button className={s.iconBtn} onClick={download} title="Download">
+            <Download size={13} />
           </button>
         </div>
       </div>
 
+      {/* Modules list if complex */}
+      {currentPRD.isComplex && currentPRD.modules.length > 0 && (
+        <div className={s.modulesList}>
+          {currentPRD.modules.map(m => (
+            <span key={m} className={s.moduleChip}>{m}</span>
+          ))}
+        </div>
+      )}
+
+      {/* PRD Content */}
       <div className={s.content}>
-        <div className={s.markdown}>
-          {currentPRD.content.split('\n').map((line: string, i: number) => {
-            if (line.startsWith('# ')) {
-              return (
-                <h2 key={i} className={s.h2}>
-                  {line.slice(2)}
-                </h2>
-              )
-            }
-            if (line.startsWith('## ')) {
-              return (
-                <h3 key={i} className={s.h3}>
-                  {line.slice(3)}
-                </h3>
-              )
-            }
-            if (line.startsWith('- ')) {
-              return (
-                <li key={i} className={s.li}>
-                  {line.slice(2)}
-                </li>
-              )
-            }
-            if (line.startsWith('| ')) {
-              return (
-                <code key={i} className={s.code}>
-                  {line}
-                </code>
-              )
-            }
-            if (line.trim()) {
-              return (
-                <p key={i} className={s.p}>
-                  {line}
-                </p>
-              )
-            }
-            return null
-          })}
-        </div>
+        <MarkdownRenderer content={currentPRD.content} />
       </div>
 
-      <div className={s.versionHistory}>
-        <p className={s.historyLabel}>Version History</p>
+      {/* Version History */}
+      {session.prdVersions.length > 1 && (
         <div className={s.versions}>
-          {session.prdVersions.map((prd, i) => (
-            <div key={i} className={`${s.version} ${prd.prdId === currentPRD.prdId ? s.active : ''}`}>
-              <span className={s.versionLabel}>{prd.label}</span>
-              <span className={s.versionDate}>
-                {new Date(prd.createdAt).toLocaleDateString()}
-              </span>
+          <p className={s.versionsLabel}>Version History</p>
+          {session.prdVersions.map((v, i) => (
+            <div key={i} className={`${s.version} ${v.prdId === currentPRD.prdId ? s.activeVersion : ''}`}>
+              <span className={s.versionLabel}>{v.label}</span>
+              <span className={s.versionDate}>{new Date(v.createdAt).toLocaleDateString()}</span>
             </div>
           ))}
         </div>
-      </div>
+      )}
 
-      {session.stage === 'prd_generated' && (
+      {/* Footer actions */}
+      {!isApproved && (
         <div className={s.footer}>
-          <button className={`${s.btn} ${s.primary}`} onClick={onApprove} disabled={loading}>
-            <CheckCircle size={16} />
-            Approve PRD
+          <button className={s.approveBtn} onClick={onApprove} disabled={loading}>
+            <CheckCircle size={14} /> Approve PRD
           </button>
-          <button className={`${s.btn} ${s.secondary}`} onClick={onRegenerate} disabled={loading}>
-            <RefreshCw size={16} />
-            Regenerate
+          <button className={s.genTestsBtn} onClick={onGenerateTests} disabled={loading}>
+            <TestTube size={14} /> Generate Tests
           </button>
         </div>
       )}
+      {isApproved && (
+        <div className={s.footer}>
+          <button className={s.genTestsBtn} onClick={onGenerateTests} disabled={loading} style={{ flex: 1 }}>
+            <TestTube size={14} /> {session.stage === 'tests_generated' ? 'Regenerate Tests' : 'Generate Tests'}
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function MarkdownRenderer({ content }: { content: string }) {
+  return (
+    <div className={s.markdown}>
+      {content.split('\n').map((line, i) => {
+        if (line.startsWith('# '))   return <h1 key={i} className={s.h1}>{line.slice(2)}</h1>
+        if (line.startsWith('## '))  return <h2 key={i} className={s.h2}>{line.slice(3)}</h2>
+        if (line.startsWith('### ')) return <h3 key={i} className={s.h3}>{line.slice(4)}</h3>
+        if (line.startsWith('#### '))return <h4 key={i} className={s.h4}>{line.slice(5)}</h4>
+        if (line.startsWith('| '))   return <div key={i} className={s.table}>{line}</div>
+        if (line.startsWith('- ') || line.startsWith('* '))
+          return <div key={i} className={s.li}>• {line.slice(2)}</div>
+        if (/^\d+\. /.test(line))    return <div key={i} className={s.li}>{line}</div>
+        if (line.startsWith('---'))  return <hr key={i} className={s.hr} />
+        if (line.trim() === '')      return <div key={i} className={s.spacer} />
+        return <p key={i} className={s.p}>{line}</p>
+      })}
     </div>
   )
 }

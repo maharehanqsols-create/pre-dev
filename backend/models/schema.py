@@ -137,6 +137,9 @@ class RiskDetail(BaseModel):
     description: str
     mitigation:  str
 
+class LimitDetail(BaseModel):        
+    type:        str = ""
+    description: str = ""
 
 class TestCaseResponse(BaseModel):
     id:                int

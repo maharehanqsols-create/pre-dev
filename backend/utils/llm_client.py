@@ -89,6 +89,50 @@ def build_kwargs(config: LLMConfig) -> dict:
     return kwargs
 
 
+def _extract_json_candidate(text: str) -> str:
+    """Return the best JSON substring from a cleaned text block."""
+    stack = []
+    in_string = False
+    escape = False
+    valid_end = -1
+
+    for i, ch in enumerate(text):
+        if in_string:
+            if escape:
+                escape = False
+            elif ch == '\\':
+                escape = True
+            elif ch == '"':
+                in_string = False
+            continue
+
+        if ch == '"':
+            in_string = True
+            continue
+
+        if ch in '{[':
+            stack.append(ch)
+        elif ch in '}]':
+            if not stack:
+                continue
+            last = stack[-1]
+            if (last == '{' and ch == '}') or (last == '[' and ch == ']'):
+                stack.pop()
+                if not stack:
+                    valid_end = i
+            else:
+                continue
+
+    if valid_end != -1:
+        return text[:valid_end + 1]
+
+    if stack:
+        closing = ''.join('}' if c == '{' else ']' for c in reversed(stack))
+        return text + closing
+
+    return text
+
+
 def clean_json(raw: str) -> str:
     """Extract pure JSON from model output"""
     if not raw or not raw.strip():
@@ -105,14 +149,11 @@ def clean_json(raw: str) -> str:
     text = re.sub(r'\n?```\s*$', '', text)
     text = text.strip()
 
-    # Find first { or [ and last } or ]
     json_start = next((i for i, c in enumerate(text) if c in ('{', '[')), -1)
-    json_end   = next((i for i in range(len(text)-1, -1, -1) if text[i] in ('}', ']')), -1)
+    if json_start == -1:
+        return ""
 
-    if json_start != -1 and json_end != -1 and json_end >= json_start:
-        text = text[json_start:json_end+1]
-
-    return text.strip()
+    return _extract_json_candidate(text[json_start:]).strip()
 
 
 async def call_model(

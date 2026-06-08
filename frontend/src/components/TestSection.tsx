@@ -1,129 +1,107 @@
-import { useState, useEffect } from 'react'
-import { Check, X, RefreshCw, ChevronDown, ChevronUp, AlertTriangle, Info } from 'lucide-react'
-import type { PRD, LLMConfig, TestCase } from '../api'
-import { generateTests, listTests, approveTest, rejectTest, regenerateTest } from '../api'
-import s from './TestSection.module.css'
+import { CheckCircle, XCircle, RefreshCw, ChevronDown, ChevronUp, AlertTriangle } from 'lucide-react'
+import { useState } from 'react'
+import type { TCRecord } from '../store/session'
+import s from './TestCasePanel.module.css'
 
 interface Props {
-  prd: PRD
-  config: LLMConfig
+  testCases: TCRecord[]
+  onApprove: (id: number) => void
+  onReject: (id: number, reason: string) => void
+  onRegenerate: (tc: TCRecord) => void
+  loading: boolean
 }
 
-export default function TestSection({ prd, config }: Props) {
-  const [tests, setTests] = useState<TestCase[]>([])
-  const [loading, setLoading] = useState(false)
-  const [generated, setGenerated] = useState(false)
-  const [error, setError] = useState('')
-  const [rejectId, setRejectId] = useState<number | null>(null)
+export default function TestCasePanel({ testCases, onApprove, onReject, onRegenerate, loading }: Props) {
+  const [expandedId, setExpandedId] = useState<number | null>(null)
+  const [rejectingId, setRejectingId] = useState<number | null>(null)
   const [rejectReason, setRejectReason] = useState('')
-  const [actionLoading, setActionLoading] = useState<number | null>(null)
-  const [expanded, setExpanded] = useState<Set<number>>(new Set())
-
-  useEffect(() => {
-    listTests(prd.id).then(data => {
-      if (data.length) { setTests(data); setGenerated(true) }
-    })
-  }, [prd.id])
-
-  const generate = async () => {
-    setLoading(true); setError('')
-    try {
-      const result = await generateTests(prd.id, config)
-      setTests(result); setGenerated(true)
-      setExpanded(new Set(result.slice(0, 3).map(t => t.id)))
-    } catch (e: any) {
-      setError(e.response?.data?.detail || e.message)
-    } finally { setLoading(false) }
-  }
-
-  const updateOne = (updated: TestCase) =>
-    setTests(prev => prev.map(t => t.id === updated.id ? updated : t))
-
-  const doApprove = async (id: number) => {
-    setActionLoading(id)
-    try { updateOne(await approveTest(id)) } finally { setActionLoading(null) }
-  }
-
-  const doReject = async () => {
-    if (!rejectId || !rejectReason.trim()) return
-    setActionLoading(rejectId)
-    try {
-      updateOne(await rejectTest(rejectId, rejectReason))
-      setRejectId(null); setRejectReason('')
-    } finally { setActionLoading(null) }
-  }
-
-  const doRegen = async (tc: TestCase) => {
-    setActionLoading(tc.id)
-    try { updateOne(await regenerateTest(tc.id, config, tc, prd.content)) }
-    finally { setActionLoading(null) }
-  }
-
-  const toggleExpand = (id: number) => {
-    setExpanded(prev => {
-      const n = new Set(prev)
-      n.has(id) ? n.delete(id) : n.add(id)
-      return n
-    })
-  }
+  const [filter, setFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('all')
+  const [busy, setBusy] = useState<number | null>(null)
 
   const stats = {
-    total: tests.length,
-    approved: tests.filter(t => t.status === 'approved').length,
-    rejected: tests.filter(t => t.status === 'rejected').length,
-    pending: tests.filter(t => t.status === 'pending').length,
+    total:    testCases.length,
+    approved: testCases.filter(t => t.status === 'approved').length,
+    pending:  testCases.filter(t => t.status === 'pending').length,
+    rejected: testCases.filter(t => t.status === 'rejected').length,
+  }
+
+  const filtered = filter === 'all' ? testCases : testCases.filter(t => t.status === filter)
+
+  const handleApprove = async (id: number) => {
+    setBusy(id); await onApprove(id); setBusy(null)
+  }
+  const handleReject = async (id: number) => {
+    if (!rejectReason.trim()) return
+    setBusy(id); await onReject(id, rejectReason); setBusy(null)
+    setRejectingId(null); setRejectReason('')
+  }
+  const handleRegen = async (tc: TCRecord) => {
+    setBusy(tc.id); await onRegenerate(tc); setBusy(null)
+  }
+
+  if (testCases.length === 0) {
+    return (
+      <div className={s.empty}>
+        <div className={s.emptyIcon}>🧪</div>
+        <p>No test cases yet</p>
+        <span>Approve a PRD and click "Generate Tests"</span>
+      </div>
+    )
   }
 
   return (
-    <div className={s.wrap}>
-      <div className={s.header}>
-        <div>
-          <h2 className={s.title}>Test Cases</h2>
-          <p className={s.sub}>Review, approve, reject or regenerate each test case</p>
-        </div>
-        {!generated && (
-          <button className={s.genBtn} onClick={generate} disabled={loading}>
-            {loading ? <><span className={s.spinner} /> Generating...</> : 'Generate Test Cases'}
+    <div className={s.panel}>
+      {/* Stats */}
+      <div className={s.stats}>
+        {(['all', 'pending', 'approved', 'rejected'] as const).map(f => (
+          <button
+            key={f}
+            className={`${s.statBtn} ${filter === f ? s.activeFilter : ''} ${f !== 'all' ? s[f] : ''}`}
+            onClick={() => setFilter(f)}
+          >
+            <span className={s.statNum}>
+              {f === 'all' ? stats.total : stats[f]}
+            </span>
+            <span className={s.statLabel}>{f === 'all' ? 'Total' : f.charAt(0).toUpperCase() + f.slice(1)}</span>
           </button>
-        )}
+        ))}
       </div>
 
-      {error && <div className={s.error}>{error}</div>}
-
-      {generated && (
-        <div className={s.stats}>
-          <div className={s.stat}><span className={s.statNum}>{stats.total}</span><span>Total</span></div>
-          <div className={s.stat}><span className={s.statNum} style={{color:'var(--green)'}}>{stats.approved}</span><span>Approved</span></div>
-          <div className={s.stat}><span className={s.statNum} style={{color:'var(--amber)'}}>{stats.pending}</span><span>Pending</span></div>
-          <div className={s.stat}><span className={s.statNum} style={{color:'var(--red)'}}>{stats.rejected}</span><span>Rejected</span></div>
-        </div>
-      )}
-
-      {loading && (
-        <div className={s.loadingBox}>
-          <span className={s.spinner} />
-          <span>Generating sequentially: Scenarios → Risks → Limitations → Test Cases (1-2 min)...</span>
-        </div>
-      )}
-
+      {/* List */}
       <div className={s.list}>
-        {tests.map(tc => (
+        {filtered.map(tc => (
           <div key={tc.id} className={`${s.card} ${s[tc.status]}`}>
-            <div className={s.cardHeader} onClick={() => toggleExpand(tc.id)}>
-              <div className={s.cardLeft}>
-                <span className={s.priority} data-p={tc.priority}>{tc.priority}</span>
-                <span className={s.category}>{tc.scenario_category}</span>
-                <span className={s.tcTitle}>{tc.title}</span>
+            {/* Card header */}
+            <button
+              className={s.cardHeader}
+              onClick={() => setExpandedId(expandedId === tc.id ? null : tc.id)}
+            >
+              <div className={`${s.pri} ${s[`pri${tc.priority}`]}`}>{tc.priority[0]}</div>
+              <div className={s.cardInfo}>
+                <span className={s.cardTitle}>{tc.title}</span>
+                <span className={s.cardMeta}>
+                  {tc.scenario_category} · {tc.scenario_id}
+                </span>
               </div>
               <div className={s.cardRight}>
-                <span className={s.statusDot} data-status={tc.status} />
-                {expanded.has(tc.id) ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                {tc.status === 'approved' && <CheckCircle size={13} className={s.iconGreen} />}
+                {tc.status === 'pending'  && <div className={`${s.dot} ${s.dotAmber}`} />}
+                {tc.status === 'rejected' && <XCircle size={13} className={s.iconRed} />}
+                {expandedId === tc.id ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
               </div>
-            </div>
+            </button>
 
-            {expanded.has(tc.id) && (
+            {expandedId === tc.id && (
               <div className={s.cardBody}>
-                {tc.preconditions.length > 0 && (
+                {/* Tags */}
+                {tc.tags?.length > 0 && (
+                  <div className={s.tags}>
+                    {tc.tags.map((t, i) => <span key={i} className={s.tag}>{t}</span>)}
+                  </div>
+                )}
+
+                {/* Preconditions */}
+                {tc.preconditions?.length > 0 && (
                   <div className={s.section}>
                     <div className={s.sectionLabel}>Preconditions</div>
                     {tc.preconditions.map((p, i) => (
@@ -132,78 +110,101 @@ export default function TestSection({ prd, config }: Props) {
                   </div>
                 )}
 
-                <div className={s.section}>
-                  <div className={s.sectionLabel}>Gherkin</div>
-                  <div className={s.gherkin}>
-                    {tc.gherkin_steps.map((step, i) => (
-                      <div key={i} className={s.step}>
-                        <span className={s.keyword} data-kw={step.keyword}>{step.keyword}</span>
-                        <span className={s.stepText}>{step.text}</span>
+                {/* Gherkin */}
+                {tc.gherkin_steps?.length > 0 && (
+                  <div className={s.section}>
+                    <div className={s.sectionLabel}>Test Steps</div>
+                    <div className={s.gherkin}>
+                      {tc.gherkin_steps.map((step, i) => (
+                        <div key={i} className={s.step}>
+                          <span className={s.kw} data-kw={step.keyword}>{step.keyword}</span>
+                          <span className={s.stepText}>{step.text}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Edge Notes */}
+                {tc.edge_notes?.length > 0 && (
+                  <div className={s.section}>
+                    <div className={s.sectionLabel}>Edge Cases & Gotchas</div>
+                    {tc.edge_notes.map((n, i) => (
+                      <div key={i} className={s.edgeNote}>
+                        <AlertTriangle size={11} /> {n}
                       </div>
                     ))}
                   </div>
-                </div>
+                )}
 
-                {tc.tags.length > 0 && (
-                  <div className={s.tags}>
-                    {tc.tags.map(tag => <span key={tag} className={s.tag}>{tag}</span>)}
+                {/* Risks */}
+                {tc.risks?.length > 0 && (
+                  <div className={s.section}>
+                    <div className={s.sectionLabel}>Risks</div>
+                    <div className={s.risksBox}>
+                      {tc.risks.map((r, i) => (
+                        <div key={i} className={s.riskItem}>
+                          <span className={s.riskSev} data-sev={typeof r === 'string' ? 'MEDIUM' : r.severity}>
+                            {typeof r === 'string' ? 'RISK' : r.severity}
+                          </span>
+                          <div className={s.riskContent}>
+                            <span className={s.riskDesc}>
+                              {typeof r === 'string' ? r : r.description}
+                            </span>
+                            {typeof r !== 'string' && r.mitigation && (
+                              <span className={s.riskMit}>↳ {r.mitigation}</span>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 )}
 
-                {tc.risks.length > 0 && (
-                  <div className={s.risksBox}>
-                    <div className={s.riskLabel}><AlertTriangle size={12} /> Risks</div>
-                    {tc.risks.slice(0, 2).map((r, i) => <div key={i} className={s.riskItem}>{r}</div>)}
-                  </div>
-                )}
-
-                {tc.reject_reason && (
+                {/* Rejection reason */}
+                {tc.status === 'rejected' && tc.reject_reason && (
                   <div className={s.rejectReasonBox}>
-                    <Info size={12} /> Rejected: {tc.reject_reason}
+                    <XCircle size={12} /> {tc.reject_reason}
                   </div>
                 )}
 
-                {rejectId === tc.id && (
+                {/* Reject form */}
+                {rejectingId === tc.id && (
                   <div className={s.rejectForm}>
-                    <input
-                      className={s.rejectInput}
-                      placeholder="Reason for rejection..."
+                    <textarea
+                      className={s.rejectTextarea}
                       value={rejectReason}
                       onChange={e => setRejectReason(e.target.value)}
-                      onKeyDown={e => e.key === 'Enter' && doReject()}
-                      autoFocus
+                      placeholder="Why is this test case being rejected?"
+                      rows={2} autoFocus
                     />
-                    <button className={s.rejectConfirm} onClick={doReject}>Confirm</button>
-                    <button className={s.rejectCancel} onClick={() => setRejectId(null)}>Cancel</button>
+                    <div className={s.rejectFormActions}>
+                      <button className={s.confirmReject} onClick={() => handleReject(tc.id)} disabled={!rejectReason.trim()}>
+                        Confirm Reject
+                      </button>
+                      <button className={s.cancelReject} onClick={() => { setRejectingId(null); setRejectReason('') }}>
+                        Cancel
+                      </button>
+                    </div>
                   </div>
                 )}
 
-                {tc.status !== 'approved' && (
-                  <div className={s.cardActions}>
-                    <button
-                      className={s.regenAction}
-                      onClick={() => doRegen(tc)}
-                      disabled={actionLoading === tc.id}
-                    >
-                      <RefreshCw size={12} className={actionLoading === tc.id ? s.spinning : ''} />
-                      Regenerate
+                {/* Actions */}
+                <div className={s.actions}>
+                  <button className={s.regenAction} onClick={() => handleRegen(tc)} disabled={loading || busy === tc.id}>
+                    <RefreshCw size={12} className={busy === tc.id ? s.spin : ''} /> Regenerate
+                  </button>
+                  {tc.status !== 'rejected' && rejectingId !== tc.id && (
+                    <button className={s.rejectAction} onClick={() => setRejectingId(tc.id)} disabled={loading || busy === tc.id}>
+                      <XCircle size={12} /> Reject
                     </button>
-                    <button
-                      className={s.rejectAction}
-                      onClick={() => { setRejectId(tc.id); setRejectReason('') }}
-                      disabled={actionLoading === tc.id}
-                    >
-                      <X size={12} /> Reject
+                  )}
+                  {tc.status !== 'approved' && (
+                    <button className={s.approveAction} onClick={() => handleApprove(tc.id)} disabled={loading || busy === tc.id}>
+                      <CheckCircle size={12} /> Approve
                     </button>
-                    <button
-                      className={s.approveAction}
-                      onClick={() => doApprove(tc.id)}
-                      disabled={actionLoading === tc.id}
-                    >
-                      <Check size={12} /> Approve
-                    </button>
-                  </div>
-                )}
+                  )}
+                </div>
               </div>
             )}
           </div>
