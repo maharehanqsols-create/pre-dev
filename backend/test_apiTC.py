@@ -2,7 +2,7 @@ import requests
 
 API_KEY = "your_ollama_api_key_here"
 
-BASE_URL = "https://ollama-api.q-solutions.pk/v1/chat/completions"
+BASE_URL = ""
 
 headers = {
     "Authorization": f"Bearer {API_KEY}",

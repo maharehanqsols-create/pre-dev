@@ -80,7 +80,7 @@ def list_providers():
                 "requires_key": True,
                 "requires_base_url": True,
                 "default_model": "Qwen3-VL:latest",
-                "default_base_url": "https://ollama-api.q-solutions.pk/v1",
+                "default_base_url": "",
                 "models": ["Qwen3-VL:latest", "gemma4:e4b"],
             },
         ]
